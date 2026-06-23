@@ -17,7 +17,7 @@ from .extractors import (
     subtitle_stem,
 )
 from .report import write_report
-from .utils import extract_bvid, utc_now_iso, write_json, write_jsonl, write_srt, write_txt
+from .utils import extract_bvid, sanitize_for_manifest, utc_now_iso, write_json, write_jsonl, write_srt, write_txt
 
 
 TOOL_VERSION = "0.1.0"
@@ -26,7 +26,7 @@ TOOL_VERSION = "0.1.0"
 @dataclass
 class ParseOptions:
     url_or_bvid: str
-    cookie_file: Path = Path("bilibili_cookies.txt")
+    cookie_file: Path = Path("runtime/bilibili_cookies.txt")
     output_dir: Path = Path("output")
     comment_pages: int = 1
     reply_pages: int = 1
@@ -80,6 +80,10 @@ def _record_failure(
             "fetched_at": utc_now_iso(),
         }
     )
+
+
+def _write_manifest(path: Path, manifest: dict[str, Any]) -> Path:
+    return write_json(path, sanitize_for_manifest(manifest))
 
 
 def _error_parts(exc: Exception) -> tuple[str, int | str | None, str]:
@@ -140,7 +144,7 @@ def parse_video(options: ParseOptions) -> ParseResult:
         _record_failure(manifest, stage="metadata", status=status, error_code=code, error_message=message)
         manifest["stages"]["metadata"] = {"status": "failed", "message": message}
         manifest["finished_at"] = utc_now_iso()
-        manifest["files"]["manifest"] = str(write_json(out_dir / "manifest.json", manifest))
+        manifest["files"]["manifest"] = str(_write_manifest(out_dir / "manifest.json", manifest))
         return ParseResult(bvid=bvid, output_dir=out_dir, manifest=manifest)
 
     page_outputs = {
@@ -328,14 +332,38 @@ def parse_video(options: ParseOptions) -> ParseResult:
             comments_path = write_jsonl(out_dir / "comments" / "comments.jsonl", comment_data["comments"])
             tree_path = write_json(out_dir / "comments" / "tree.json", comment_data["tree"])
             manifest["files"]["comments"] = {"jsonl": str(comments_path), "tree": str(tree_path)}
-            _stage_ok(manifest, "comments", f"Fetched {len(comment_data['comments'])} comment row(s).")
+            truncations = list(comment_data.get("truncations") or [])
+            if truncations:
+                first = truncations[0]
+                _stage_ok(
+                    manifest,
+                    "comments",
+                    f"Fetched {len(comment_data['comments'])} comment row(s), truncated by safety cap.",
+                    truncated=True,
+                    truncations=truncations,
+                    cap_kind=first.get("cap_kind"),
+                    cap_pages=first.get("cap_pages"),
+                )
+                for item in truncations:
+                    _record_failure(
+                        manifest,
+                        stage="comments",
+                        status="truncated",
+                        error_code=item.get("cap_kind"),
+                        error_message=(
+                            f"Comment fetching stopped at safety cap "
+                            f"{item.get('cap_pages')} page(s)."
+                        ),
+                    )
+            else:
+                _stage_ok(manifest, "comments", f"Fetched {len(comment_data['comments'])} comment row(s).")
         except Exception as exc:
             status, code, message = _error_parts(exc)
             _record_failure(manifest, stage="comments", status=status, error_code=code, error_message=message)
             manifest["stages"]["comments"] = {"status": "failed", "message": message}
 
     manifest["finished_at"] = utc_now_iso()
-    manifest["files"]["manifest"] = str(write_json(out_dir / "manifest.json", manifest))
+    manifest["files"]["manifest"] = str(_write_manifest(out_dir / "manifest.json", manifest))
 
     if options.write_report:
         try:
@@ -347,14 +375,14 @@ def parse_video(options: ParseOptions) -> ParseResult:
             _record_failure(manifest, stage="report", status=status, error_code=code, error_message=message)
             manifest["stages"]["report"] = {"status": "failed", "message": message}
 
-    manifest["files"]["manifest"] = str(write_json(out_dir / "manifest.json", manifest))
+    manifest["files"]["manifest"] = str(_write_manifest(out_dir / "manifest.json", manifest))
     return ParseResult(bvid=bvid, output_dir=out_dir, manifest=manifest)
 
 
 def parse_subtitles_only(
     url_or_bvid: str,
     *,
-    cookie_file: Path = Path("bilibili_cookies.txt"),
+    cookie_file: Path = Path("runtime/bilibili_cookies.txt"),
     output_dir: Path = Path("output"),
     page: int | None = None,
 ) -> ParseResult:

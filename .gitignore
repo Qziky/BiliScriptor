@@ -20,6 +20,7 @@ dist/
 *.egg-info/
 
 # Local Bilibili credentials and login artifacts
+runtime/
 bilibili_cookies.txt
 *cookies*.txt
 bilibili_login_qr.svg
@@ -29,6 +30,7 @@ output/
 output_*/
 
 # Logs and temporary files
+logs/
 *.log
 *.tmp
 *.temp

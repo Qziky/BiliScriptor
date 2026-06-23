@@ -1,15 +1,84 @@
 from __future__ import annotations
 
 import json
+import contextlib
+import io
+import urllib.error
+from io import BytesIO
 from pathlib import Path
+from typing import Any
+from unittest.mock import Mock, patch
 
-from biliscriptor.client import get_mixin_key, normalize_error_status, sign_wbi
+from biliscriptor.client import BiliApiError, BiliClient, get_mixin_key, normalize_error_status, sign_wbi
 from biliscriptor.cli import build_parser
 from biliscriptor.danmaku_pb import decode_dm_seg_mobile_reply
-from biliscriptor.extractors import normalize_reply, normalize_subtitle_rows
+from biliscriptor.extractors import fetch_comments, normalize_reply, normalize_subtitle_rows
+import biliscriptor.pipeline as pipeline
 from biliscriptor.pipeline import ParseOptions
 from biliscriptor.report import build_report
 from biliscriptor.utils import extract_bvid, write_json, write_jsonl, write_srt
+
+
+class _FakeResponse:
+    def __init__(self, body: bytes = b"{}") -> None:
+        self.body = body
+
+    def __enter__(self) -> "_FakeResponse":
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return self.body
+
+
+class _FakeOpener:
+    def __init__(self, outcomes: list[object]) -> None:
+        self.outcomes = outcomes
+        self.calls = 0
+
+    def open(self, request: object, timeout: int = 0) -> _FakeResponse:
+        self.calls += 1
+        outcome = self.outcomes.pop(0)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        if isinstance(outcome, bytes):
+            return _FakeResponse(outcome)
+        return _FakeResponse(json.dumps(outcome).encode("utf-8"))
+
+
+class _SequenceClient:
+    def __init__(self, replies: list[dict[str, Any]]) -> None:
+        self.replies = replies
+
+    def get_json(self, url: str, *, params: dict[str, Any] | None = None, **_: object) -> dict[str, Any]:
+        pn = int((params or {}).get("pn") or 1)
+        return self.replies[min(pn - 1, len(self.replies) - 1)]
+
+
+class _CommentClient:
+    def __init__(self, *, child_payload: dict[str, Any] | None = None) -> None:
+        self.child_payload = child_payload or {"code": 0, "data": {"replies": []}}
+
+    def get_json(self, url: str, *, params: dict[str, Any] | None = None, **_: object) -> dict[str, Any]:
+        if url.endswith("/reply/reply"):
+            return self.child_payload
+        return {
+            "code": 0,
+            "data": {
+                "replies": [
+                    {
+                        "rpid": 1,
+                        "root": 0,
+                        "parent": 0,
+                        "member": {"mid": 10, "uname": "user"},
+                        "content": {"message": "root"},
+                    }
+                ],
+                "page": {"count": 100, "size": 20},
+            },
+        }
 
 
 def _varint(value: int) -> bytes:
@@ -54,6 +123,90 @@ def test_normalize_error_status() -> None:
     assert normalize_error_status(12345) == "api_failed"
 
 
+def test_client_parses_http_json_error_body() -> None:
+    error = urllib.error.HTTPError(
+        "https://example.test/api",
+        403,
+        "Forbidden",
+        {},
+        BytesIO(json.dumps({"code": -101, "message": "请先登录"}).encode("utf-8")),
+    )
+    client = BiliClient(rate_limit=0, max_retries=0)
+    client.opener = _FakeOpener([error])  # type: ignore[assignment]
+
+    try:
+        client.get_json("https://example.test/api")
+    except BiliApiError as exc:
+        assert exc.status == "not_logged_in"
+        assert exc.code == -101
+        assert exc.message == "请先登录"
+    else:
+        raise AssertionError("Expected BiliApiError")
+
+
+def test_client_wraps_invalid_json_response() -> None:
+    client = BiliClient(rate_limit=0, max_retries=0)
+    client.opener = _FakeOpener([b"not-json"])  # type: ignore[assignment]
+
+    try:
+        client.get_json("https://example.test/api")
+    except BiliApiError as exc:
+        assert exc.status == "invalid_json"
+    else:
+        raise AssertionError("Expected BiliApiError")
+
+
+def test_client_retries_rate_limited_http_error() -> None:
+    error = urllib.error.HTTPError(
+        "https://example.test/api",
+        429,
+        "Too Many Requests",
+        {},
+        BytesIO(json.dumps({"code": -799, "message": "rate limited"}).encode("utf-8")),
+    )
+    opener = _FakeOpener([error, {"code": 0, "data": {"ok": True}}])
+    client = BiliClient(rate_limit=0, max_retries=2)
+    client.opener = opener  # type: ignore[assignment]
+
+    with patch("biliscriptor.client.time.sleep", Mock()):
+        payload = client.get_json("https://example.test/api")
+
+    assert payload["data"]["ok"] is True
+    assert opener.calls == 2
+
+
+def test_client_retries_http_5xx_even_with_zero_api_code() -> None:
+    error = urllib.error.HTTPError(
+        "https://example.test/api",
+        503,
+        "Service Unavailable",
+        {},
+        BytesIO(json.dumps({"code": 0, "message": "temporary"}).encode("utf-8")),
+    )
+    opener = _FakeOpener([error, {"code": 0, "data": {"ok": True}}])
+    client = BiliClient(rate_limit=0, max_retries=2)
+    client.opener = opener  # type: ignore[assignment]
+
+    with patch("biliscriptor.client.time.sleep", Mock()):
+        payload = client.get_json("https://example.test/api")
+
+    assert payload["data"]["ok"] is True
+    assert opener.calls == 2
+
+
+def test_get_wbi_json_refreshes_keys_on_voucher() -> None:
+    client = BiliClient(rate_limit=0, max_retries=0)
+    client.get_wbi_keys = Mock(side_effect=[("old_img_key_12345678901234567890", "old_sub_key_12345678901234567890"), ("new_img_key_12345678901234567890", "new_sub_key_12345678901234567890")])  # type: ignore[method-assign]
+    client.get_json = Mock(side_effect=[{"code": 0, "data": {"v_voucher": "risk"}}, {"code": 0, "data": {"ok": True}}])  # type: ignore[method-assign]
+
+    payload = client.get_wbi_json("https://example.test/wbi", {"bvid": "BV1QEVY6jEYv"})
+
+    assert payload["data"]["ok"] is True
+    assert client.get_wbi_keys.call_args_list[0].kwargs == {"refresh": False}
+    assert client.get_wbi_keys.call_args_list[1].kwargs == {"refresh": True}
+    assert client.get_json.call_count == 2
+
+
 def test_default_comment_depth_is_conservative() -> None:
     options = ParseOptions(url_or_bvid="BV1QEVY6jEYv")
     assert options.comment_pages == 1
@@ -64,10 +217,65 @@ def test_default_comment_depth_is_conservative() -> None:
     assert args.reply_pages == 1
 
 
+def test_runtime_artifact_defaults_use_runtime_directory() -> None:
+    options = ParseOptions(url_or_bvid="BV1QEVY6jEYv")
+    assert options.cookie_file == Path("runtime/bilibili_cookies.txt")
+
+    login_args = build_parser().parse_args(["login"])
+    assert login_args.cookie_file == "runtime/bilibili_cookies.txt"
+    assert login_args.qr_file == "runtime/bilibili_login_qr.svg"
+
+    parse_args = build_parser().parse_args(["parse", "BV1QEVY6jEYv"])
+    assert parse_args.cookie_file == "runtime/bilibili_cookies.txt"
+
+    subtitle_args = build_parser().parse_args(["subtitles", "BV1QEVY6jEYv"])
+    assert subtitle_args.cookie_file == "runtime/bilibili_cookies.txt"
+
+
 def test_subtitles_command_exists() -> None:
     args = build_parser().parse_args(["subtitles", "BV1QEVY6jEYv", "--page", "1"])
     assert args.command == "subtitles"
     assert args.url_or_bvid == "BV1QEVY6jEYv"
+    assert args.page == 1
+
+
+def test_cli_rejects_invalid_numeric_options() -> None:
+    parser = build_parser()
+    invalid_cases = [
+        ["parse", "BV1QEVY6jEYv", "--comment-pages", "0"],
+        ["parse", "BV1QEVY6jEYv", "--reply-pages", "-1"],
+        ["parse", "BV1QEVY6jEYv", "--rate-limit", "-0.1"],
+        ["parse", "BV1QEVY6jEYv", "--page", "0"],
+        ["subtitles", "BV1QEVY6jEYv", "--page", "-1"],
+    ]
+    for argv in invalid_cases:
+        with contextlib.redirect_stderr(io.StringIO()):
+            try:
+                parser.parse_args(argv)
+            except SystemExit as exc:
+                assert exc.code == 2
+            else:
+                raise AssertionError(f"Expected argparse failure for {argv}")
+
+
+def test_cli_accepts_zero_rate_limit_and_positive_pages() -> None:
+    args = build_parser().parse_args(
+        [
+            "parse",
+            "BV1QEVY6jEYv",
+            "--comment-pages",
+            "2",
+            "--reply-pages",
+            "3",
+            "--rate-limit",
+            "0",
+            "--page",
+            "1",
+        ]
+    )
+    assert args.comment_pages == 2
+    assert args.reply_pages == 3
+    assert args.rate_limit == 0
     assert args.page == 1
 
 
@@ -147,6 +355,95 @@ def test_normalize_reply() -> None:
     assert row["start_ms"] is None
     assert row["cid"] is None
     assert row["status"] == "ok"
+
+
+def test_fetch_comments_records_comment_safety_cap() -> None:
+    with patch("biliscriptor.extractors.COMMENT_PAGE_SAFETY_CAP", 1):
+        data = fetch_comments(
+            _CommentClient(),  # type: ignore[arg-type]
+            bvid="BV1QEVY6jEYv",
+            aid=1,
+            comment_pages=1,
+            reply_pages=1,
+            all_comments=True,
+        )
+
+    assert data["truncations"] == [{"cap_kind": "comments", "cap_pages": 1, "next_page": 2}]
+
+
+def test_fetch_comments_records_reply_safety_cap() -> None:
+    child_payload = {
+        "code": 0,
+        "data": {
+            "replies": [
+                {
+                    "rpid": 2,
+                    "root": 1,
+                    "parent": 1,
+                    "member": {"mid": 11, "uname": "child"},
+                    "content": {"message": "child"},
+                }
+            ],
+            "page": {"count": 100, "size": 20},
+        },
+    }
+    with patch("biliscriptor.extractors.REPLY_PAGE_SAFETY_CAP", 1):
+        data = fetch_comments(
+            _CommentClient(child_payload=child_payload),  # type: ignore[arg-type]
+            bvid="BV1QEVY6jEYv",
+            aid=1,
+            comment_pages=1,
+            reply_pages=1,
+            all_comments=True,
+        )
+
+    assert {"cap_kind": "replies", "cap_pages": 1, "next_page": 2, "root_rpid": 1} in data["truncations"]
+
+
+def test_pipeline_comment_truncation_manifest_fields(tmp_path: Path) -> None:
+    fake_client = Mock()
+    fake_client.cookie_names = []
+
+    with (
+        patch.object(pipeline, "BiliClient", Mock(return_value=fake_client)),
+        patch.object(
+            pipeline,
+            "fetch_video_info",
+            Mock(return_value={"aid": 1, "bvid": "BV1QEVY6jEYv", "pages": []}),
+        ),
+        patch.object(
+            pipeline,
+            "fetch_comments",
+            Mock(
+                return_value={
+                    "comments": [],
+                    "tree": [],
+                    "truncations": [{"cap_kind": "comments", "cap_pages": 1, "next_page": 2}],
+                }
+            ),
+        ),
+    ):
+        result = pipeline.parse_video(
+            ParseOptions(
+                url_or_bvid="BV1QEVY6jEYv",
+                output_dir=tmp_path,
+                skip_subtitles=True,
+                skip_danmaku=True,
+                skip_streams=True,
+                write_report=False,
+                all_comments=True,
+            )
+        )
+
+    comments_stage = result.manifest["stages"]["comments"]
+    assert comments_stage["status"] == "ok"
+    assert comments_stage["truncated"] is True
+    assert comments_stage["cap_kind"] == "comments"
+    assert comments_stage["cap_pages"] == 1
+    assert result.manifest["failures"][-1]["status"] == "truncated"
+
+    manifest = json.loads((tmp_path / "BV1QEVY6jEYv" / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["stages"]["comments"]["truncated"] is True
 
 
 def test_build_report(tmp_path: Path) -> None:
@@ -287,3 +584,59 @@ def test_build_report_empty_and_failed_sections(tmp_path: Path) -> None:
     assert "未生成当前弹幕，或弹幕文件为空" in report
     assert "未生成评论或评论为空" in report
     assert "`subtitles/`：未生成" in report
+
+
+def test_build_report_snapshot_structure_and_privacy(tmp_path: Path) -> None:
+    write_json(
+        tmp_path / "video.json",
+        {
+            "title": "快照标题",
+            "bvid": "BV1QEVY6jEYv",
+            "aid": 1,
+            "duration": 61,
+            "desc": "报告快照描述",
+            "owner": {"mid": 10, "name": "测试UP"},
+            "stat": {"view": 123},
+        },
+    )
+    write_json(tmp_path / "pages.json", [{"page": 1, "cid": 2, "part": "正片", "duration": 61}])
+    write_jsonl(tmp_path / "comments" / "comments.jsonl", [{"uname": "用户", "message": "评论", "like": 1}])
+    write_json(
+        tmp_path / "manifest.json",
+        {
+            "bvid": "BV1QEVY6jEYv",
+            "finished_at": "2026-06-23T00:00:00Z",
+            "config": {
+                "cookie_file": "bilibili_cookies.txt",
+                "cookie_names": ["SESSDATA"],
+                "cookie_values": {"SESSDATA": "secret-sessdata-value"},
+                "comment_pages": 1,
+                "reply_pages": 1,
+                "all_comments": False,
+                "download_media": False,
+            },
+            "stages": {
+                "metadata": {"status": "ok", "message": "Fetched 1 page(s)."},
+                "comments": {"status": "ok", "message": "Fetched 1 comment row(s)."},
+            },
+            "failures": [],
+        },
+    )
+
+    report = build_report(tmp_path)
+    expected_sections = [
+        "# 快照标题",
+        "## 快速概览",
+        "## 视频简介",
+        "## 数据概览",
+        "## 分 P 列表",
+        "## 解析状态",
+        "## 内容预览",
+        "## 文件索引",
+        "## 追溯说明",
+    ]
+    for section in expected_sections:
+        assert section in report
+    assert "| BV / AV | `BV1QEVY6jEYv` / `1` |" in report
+    assert "- P1: 正片" in report
+    assert "secret-sessdata-value" not in report

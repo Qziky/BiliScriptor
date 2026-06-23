@@ -56,6 +56,21 @@ class BiliApiError(RuntimeError):
         return f"{self.status}: code={self.code} message={self.message} url={self.url}"
 
 
+def _decode_json_payload(raw: bytes, url: str) -> dict[str, Any]:
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise BiliApiError("invalid_json", None, str(exc), url) from exc
+    if not isinstance(payload, dict):
+        raise BiliApiError("invalid_json", None, "API response was not a JSON object.", url)
+    return payload
+
+
+def _message_from_payload(payload: dict[str, Any], fallback: str = "") -> str:
+    message = payload.get("message") or payload.get("msg") or fallback
+    return str(message)
+
+
 def normalize_error_status(code: int | str | None, http_status: int | None = None) -> str:
     if isinstance(code, int) and code in ERROR_STATUS:
         return ERROR_STATUS[code]
@@ -88,10 +103,17 @@ def sign_wbi(params: dict[str, Any], img_key: str, sub_key: str) -> dict[str, st
 
 
 class BiliClient:
-    def __init__(self, cookie_file: Path | None = None, rate_limit: float = 1.0, timeout: int = 30) -> None:
+    def __init__(
+        self,
+        cookie_file: Path | None = None,
+        rate_limit: float = 1.0,
+        timeout: int = 30,
+        max_retries: int = 2,
+    ) -> None:
         self.cookie_file = cookie_file
         self.rate_limit = max(rate_limit, 0.0)
         self.timeout = timeout
+        self.max_retries = max(max_retries, 0)
         self._last_request_at = 0.0
         self._wbi_keys: tuple[str, str] | None = None
         self.cookie_jar = http.cookiejar.MozillaCookieJar()
@@ -109,7 +131,16 @@ class BiliClient:
             time.sleep(self.rate_limit - elapsed)
         self._last_request_at = time.monotonic()
 
-    def _request(self, url: str, *, referer: str | None = None) -> bytes:
+    def _retry_delay(self, attempt: int) -> None:
+        time.sleep(min(2.0, 0.5 * (2 ** attempt)))
+
+    @staticmethod
+    def _should_retry_error(error: BiliApiError) -> bool:
+        if error.status in {"network_failed", "rate_limited"}:
+            return True
+        return isinstance(error.code, int) and 500 <= error.code <= 599
+
+    def _request_once(self, url: str, *, referer: str | None = None) -> bytes:
         self._throttle()
         headers = dict(HEADERS)
         if referer:
@@ -119,14 +150,32 @@ class BiliClient:
             with self.opener.open(request, timeout=self.timeout) as response:
                 return response.read()
         except urllib.error.HTTPError as exc:
-            raise BiliApiError(
-                normalize_error_status(None, exc.code),
-                exc.code,
-                exc.reason,
-                url,
-            ) from exc
+            try:
+                raw = exc.read()
+            finally:
+                exc.close()
+            code: int | str | None = exc.code
+            message = str(exc.reason)
+            if raw:
+                try:
+                    payload = _decode_json_payload(raw, url)
+                    code = payload.get("code", exc.code) or exc.code
+                    message = _message_from_payload(payload, message)
+                except BiliApiError:
+                    pass
+            raise BiliApiError(normalize_error_status(code, exc.code), code, message, url) from exc
         except (urllib.error.URLError, TimeoutError) as exc:
             raise BiliApiError("network_failed", None, str(exc), url) from exc
+
+    def _request(self, url: str, *, referer: str | None = None) -> bytes:
+        for attempt in range(self.max_retries + 1):
+            try:
+                return self._request_once(url, referer=referer)
+            except BiliApiError as exc:
+                if attempt >= self.max_retries or not self._should_retry_error(exc):
+                    raise
+                self._retry_delay(attempt)
+        raise RuntimeError("unreachable request retry state")
 
     def get_bytes(self, url: str, *, params: dict[str, Any] | None = None, referer: str | None = None) -> bytes:
         if params:
@@ -142,11 +191,11 @@ class BiliClient:
         accept_api_code: bool = False,
     ) -> dict[str, Any]:
         raw = self.get_bytes(url, params=params, referer=referer)
-        payload = json.loads(raw.decode("utf-8"))
+        payload = _decode_json_payload(raw, url)
         code = payload.get("code")
         if accept_api_code or code is None or code == 0:
             return payload
-        raise BiliApiError(normalize_error_status(code), code, payload.get("message") or "", url)
+        raise BiliApiError(normalize_error_status(code), code, _message_from_payload(payload), url)
 
     def get_wbi_keys(self, *, refresh: bool = False) -> tuple[str, str]:
         if self._wbi_keys and not refresh:
@@ -163,10 +212,11 @@ class BiliClient:
         return self._wbi_keys
 
     def get_wbi_json(self, url: str, params: dict[str, Any], *, referer: str | None = None) -> dict[str, Any]:
-        img_key, sub_key = self.get_wbi_keys()
-        signed = sign_wbi(params, img_key, sub_key)
-        payload = self.get_json(url, params=signed, referer=referer)
-        data = payload.get("data")
-        if isinstance(data, dict) and "v_voucher" in data:
-            raise BiliApiError("risk_control", "v_voucher", "WBI signing or risk control failed.", url)
-        return payload
+        for refresh in (False, True):
+            img_key, sub_key = self.get_wbi_keys(refresh=refresh)
+            signed = sign_wbi(params, img_key, sub_key)
+            payload = self.get_json(url, params=signed, referer=referer)
+            data = payload.get("data")
+            if not (isinstance(data, dict) and "v_voucher" in data):
+                return payload
+        raise BiliApiError("risk_control", "v_voucher", "WBI signing or risk control failed.", url)

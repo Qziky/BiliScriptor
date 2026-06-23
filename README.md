@@ -83,6 +83,8 @@ python -m biliscriptor parse BV1QEVY6jEYv \
   --page 1
 ```
 
+默认运行产物会分目录保存：登录 Cookie 和二维码在 `runtime/`，日志建议写入 `logs/`，解析数据仍输出到 `output/`。
+
 ## 命令说明
 
 | 命令 | 作用 |

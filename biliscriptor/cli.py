@@ -9,9 +9,29 @@ from .pipeline import ParseOptions, parse_subtitles_only, parse_video
 from .report import write_report
 
 
-DEFAULT_COOKIE_FILE = "bilibili_cookies.txt"
+DEFAULT_COOKIE_FILE = "runtime/bilibili_cookies.txt"
 DEFAULT_OUTPUT_DIR = "output"
-DEFAULT_QR_FILE = "bilibili_login_qr.svg"
+DEFAULT_QR_FILE = "runtime/bilibili_login_qr.svg"
+
+
+def positive_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be an integer") from exc
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("must be at least 1")
+    return parsed
+
+
+def non_negative_float(value: str) -> float:
+    try:
+        parsed = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a number") from exc
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("must be at least 0")
+    return parsed
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -32,11 +52,11 @@ def build_parser() -> argparse.ArgumentParser:
     parse.add_argument("url_or_bvid")
     parse.add_argument("--cookie-file", default=DEFAULT_COOKIE_FILE)
     parse.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR)
-    parse.add_argument("--comment-pages", type=int, default=1)
-    parse.add_argument("--reply-pages", type=int, default=1)
-    parse.add_argument("--rate-limit", type=float, default=1.0)
+    parse.add_argument("--comment-pages", type=positive_int, default=1)
+    parse.add_argument("--reply-pages", type=positive_int, default=1)
+    parse.add_argument("--rate-limit", type=non_negative_float, default=1.0)
     parse.add_argument("--all-comments", action="store_true")
-    parse.add_argument("--page", type=int, default=None, help="Only parse one 1-based page index.")
+    parse.add_argument("--page", type=positive_int, default=None, help="Only parse one 1-based page index.")
     parse.add_argument("--skip-subtitles", action="store_true")
     parse.add_argument("--skip-danmaku", action="store_true")
     parse.add_argument("--skip-comments", action="store_true")
@@ -50,7 +70,7 @@ def build_parser() -> argparse.ArgumentParser:
     subtitles.add_argument("url_or_bvid")
     subtitles.add_argument("--cookie-file", default=DEFAULT_COOKIE_FILE)
     subtitles.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR)
-    subtitles.add_argument("--page", type=int, default=None, help="Only fetch one 1-based page index.")
+    subtitles.add_argument("--page", type=positive_int, default=None, help="Only fetch one 1-based page index.")
     return parser
 
 

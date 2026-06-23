@@ -6,8 +6,30 @@ build-backend = "setuptools.build_meta"
 name = "biliscriptor"
 version = "0.1.0"
 description = "BiliScriptor / 哔稿匠: export traceable Markdown-ready Bilibili data packages."
+readme = "README.md"
 requires-python = ">=3.10"
+license = "MIT"
+authors = [
+  { name = "BiliScriptor contributors" },
+]
+keywords = ["bilibili", "cli", "markdown", "subtitles", "danmaku"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: End Users/Desktop",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Multimedia :: Video",
+  "Topic :: Text Processing :: Markup :: Markdown",
+]
 dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest"]
 
 [project.scripts]
 biliscriptor = "biliscriptor.cli:main"

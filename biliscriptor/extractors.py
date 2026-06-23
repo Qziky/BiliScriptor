@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import math
-from pathlib import Path
 from typing import Any
 
 from .client import BiliClient
@@ -15,6 +14,8 @@ PLAYURL_API = "https://api.bilibili.com/x/player/wbi/playurl"
 DM_SEG_API = "https://api.bilibili.com/x/v2/dm/web/seg.so"
 REPLY_API = "https://api.bilibili.com/x/v2/reply"
 REPLY_REPLIES_API = "https://api.bilibili.com/x/v2/reply/reply"
+COMMENT_PAGE_SAFETY_CAP = 1000
+REPLY_PAGE_SAFETY_CAP = 500
 
 
 def fetch_video_info(client: BiliClient, bvid: str) -> dict[str, Any]:
@@ -255,11 +256,20 @@ def fetch_comments(
     fetched_at = utc_now_iso()
     flat: list[dict[str, Any]] = []
     tree: list[dict[str, Any]] = []
+    truncations: list[dict[str, Any]] = []
     hot_seen: set[int] = set()
     pn = 1
-    safety_cap = 1000
-    while pn <= safety_cap:
+    while True:
         if not all_comments and pn > comment_pages:
+            break
+        if pn > COMMENT_PAGE_SAFETY_CAP:
+            truncations.append(
+                {
+                    "cap_kind": "comments",
+                    "cap_pages": COMMENT_PAGE_SAFETY_CAP,
+                    "next_page": pn,
+                }
+            )
             break
         payload = client.get_json(
             REPLY_API,
@@ -299,7 +309,7 @@ def fetch_comments(
                 source_api=REPLY_API,
             )
             flat.append(root_row)
-            children = fetch_reply_children(
+            children_result = _fetch_reply_children_result(
                 client,
                 bvid=bvid,
                 aid=aid,
@@ -308,7 +318,9 @@ def fetch_comments(
                 reply_pages=reply_pages,
                 all_comments=all_comments,
             )
+            children = children_result["replies"]
             flat.extend(children)
+            truncations.extend(children_result["truncations"])
             tree.append({"comment": root_row, "replies": children})
         page = data.get("page") or {}
         count = int(page.get("count") or 0)
@@ -316,7 +328,7 @@ def fetch_comments(
         if count and pn >= math.ceil(count / max(size, 1)):
             break
         pn += 1
-    return {"comments": flat, "tree": tree}
+    return {"comments": flat, "tree": tree, "truncations": truncations}
 
 
 def fetch_reply_children(
@@ -329,13 +341,44 @@ def fetch_reply_children(
     reply_pages: int,
     all_comments: bool,
 ) -> list[dict[str, Any]]:
+    return _fetch_reply_children_result(
+        client,
+        bvid=bvid,
+        aid=aid,
+        root_rpid=root_rpid,
+        fetched_at=fetched_at,
+        reply_pages=reply_pages,
+        all_comments=all_comments,
+    )["replies"]
+
+
+def _fetch_reply_children_result(
+    client: BiliClient,
+    *,
+    bvid: str,
+    aid: int,
+    root_rpid: int,
+    fetched_at: str,
+    reply_pages: int,
+    all_comments: bool,
+) -> dict[str, list[dict[str, Any]]]:
     if not root_rpid:
-        return []
+        return {"replies": [], "truncations": []}
     children: list[dict[str, Any]] = []
+    truncations: list[dict[str, Any]] = []
     pn = 1
-    safety_cap = 500
-    while pn <= safety_cap:
+    while True:
         if not all_comments and pn > reply_pages:
+            break
+        if pn > REPLY_PAGE_SAFETY_CAP:
+            truncations.append(
+                {
+                    "cap_kind": "replies",
+                    "cap_pages": REPLY_PAGE_SAFETY_CAP,
+                    "next_page": pn,
+                    "root_rpid": root_rpid,
+                }
+            )
             break
         payload = client.get_json(
             REPLY_REPLIES_API,
@@ -364,8 +407,4 @@ def fetch_reply_children(
         if count and pn >= math.ceil(count / max(size, 1)):
             break
         pn += 1
-    return children
-
-
-def output_file(path: Path) -> str:
-    return str(path.resolve())
+    return {"replies": children, "truncations": truncations}

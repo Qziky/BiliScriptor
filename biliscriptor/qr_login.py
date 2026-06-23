@@ -4,7 +4,7 @@ Scan a Bilibili login QR code and save cookies locally.
 
 Usage:
     python -m biliscriptor login
-    python -m biliscriptor.qr_login --cookie-file bilibili_cookies.txt
+    python -m biliscriptor.qr_login --cookie-file runtime/bilibili_cookies.txt
 
 The script writes a Netscape-format cookie file that can be reused by
 the parser. It intentionally does not print sensitive cookie values.
@@ -26,8 +26,8 @@ from pathlib import Path
 
 LOGIN_GENERATE_URL = "https://passport.bilibili.com/x/passport-login/web/qrcode/generate"
 LOGIN_POLL_URL = "https://passport.bilibili.com/x/passport-login/web/qrcode/poll"
-DEFAULT_COOKIE_FILE = "bilibili_cookies.txt"
-DEFAULT_QR_FILE = "bilibili_login_qr.svg"
+DEFAULT_COOKIE_FILE = "runtime/bilibili_cookies.txt"
+DEFAULT_QR_FILE = "runtime/bilibili_login_qr.svg"
 
 
 HEADERS = {
