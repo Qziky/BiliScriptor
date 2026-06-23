@@ -159,11 +159,7 @@ tests/
 ## Star 曲线
 
 <p align="center">
-  <img src="assets/star-history.svg" alt="BiliScriptor star history curve" />
+  <a href="https://star-history.com/#Qziky/BiliScriptor&Date">
+    <img src="https://api.star-history.com/svg?repos=Qziky/BiliScriptor&type=Date" alt="BiliScriptor star history curve" />
+  </a>
 </p>
-
-项目发布到 GitHub 后，可以将上面的本地占位图替换为实时 Star History 图：
-
-```markdown
-[![Star History Chart](https://api.star-history.com/svg?repos=OWNER/REPO&type=Date)](https://star-history.com/#OWNER/REPO&Date)
-```
