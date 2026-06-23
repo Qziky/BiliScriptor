@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bili-md"
+version = "0.1.0"
+description = "Local Bilibili video parser that exports traceable data packages."
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+bili-md = "bili_md.cli:main"
+
+[tool.setuptools]
+packages = ["bili_md"]
+py-modules = ["login_bilibili_qr", "fetch_bilibili_subtitles"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
