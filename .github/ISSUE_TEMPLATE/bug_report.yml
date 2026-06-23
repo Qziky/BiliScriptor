@@ -1,0 +1,65 @@
+name: Bug report
+description: 报告解析失败、输出异常或日志中的错误
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。请不要粘贴 cookie 值、token、完整响应体、完整字幕、完整评论或完整弹幕正文。
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: 例如 git commit、release 版本或本地分支
+      placeholder: v0.1.0 / commit hash
+    validations:
+      required: true
+  - type: dropdown
+    id: command
+    attributes:
+      label: 受影响命令
+      options:
+        - parse
+        - subtitles
+        - report
+        - login
+        - other
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 请提供可复现的命令和必要上下文，敏感参数请脱敏。
+      placeholder: |
+        python -m biliscriptor parse BVxxxx --comment-pages 1
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望行为
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为
+      description: 可以粘贴脱敏后的控制台摘要或日志事件。
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 脱敏日志
+      description: 请优先提供相关 JSONL 事件，确认已移除 secret、cookie 值和正文内容。
+      render: json
+  - type: textarea
+    id: env
+    attributes:
+      label: 环境信息
+      placeholder: |
+        OS:
+        Python:
+        安装方式:

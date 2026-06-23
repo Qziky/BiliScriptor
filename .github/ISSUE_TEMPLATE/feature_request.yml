@@ -1,0 +1,38 @@
+name: Feature request
+description: 建议新的解析能力、输出格式或工作流
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 你想解决什么问题
+      description: 描述你的使用场景，而不只是具体实现。
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 期望能力
+      description: 说明你希望 CLI、输出文件、报告或日志如何变化。
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: 相关领域
+      options:
+        - parsing
+        - subtitles
+        - danmaku
+        - comments
+        - report
+        - logging
+        - login
+        - docs
+        - other
+  - type: textarea
+    id: examples
+    attributes:
+      label: 示例或参考
+      description: 可以提供命令、输出草图或类似工具；不要包含敏感信息。

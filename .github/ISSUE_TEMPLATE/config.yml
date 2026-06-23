@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: BiliScriptor Discussions
+    url: https://github.com/Qziky/BiliScriptor/discussions
+    about: 适合提问、展示工作流、讨论 Roadmap 和分享使用经验。
