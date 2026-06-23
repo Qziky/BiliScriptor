@@ -1,21 +1,34 @@
 from __future__ import annotations
 
 import json
+import logging
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from .logging_config import log_event
 from .utils import write_jsonl
 
 
 def _load_json(path: Path, default: Any) -> Any:
     if not path.is_file():
+        log_event("report.load_json_missing", "JSON source missing.", level=logging.DEBUG, path=str(path))
         return default
-    return json.loads(path.read_text(encoding="utf-8"))
+    data = json.loads(path.read_text(encoding="utf-8"))
+    log_event(
+        "report.load_json",
+        "JSON source loaded.",
+        level=logging.DEBUG,
+        path=str(path),
+        top_level_type=type(data).__name__,
+    )
+    return data
 
 
 def _load_jsonl(path: Path, limit: int | None = None) -> list[dict[str, Any]]:
     if not path.is_file():
+        log_event("report.load_jsonl_missing", "JSONL source missing.", level=logging.DEBUG, path=str(path))
         return []
     rows: list[dict[str, Any]] = []
     with path.open("r", encoding="utf-8") as f:
@@ -26,6 +39,14 @@ def _load_jsonl(path: Path, limit: int | None = None) -> list[dict[str, Any]]:
             rows.append(json.loads(line))
             if limit and len(rows) >= limit:
                 break
+    log_event(
+        "report.load_jsonl",
+        "JSONL source loaded.",
+        level=logging.DEBUG,
+        path=str(path),
+        row_count=len(rows),
+        limit=limit,
+    )
     return rows
 
 
@@ -235,6 +256,8 @@ def _stat_summary(stat: dict[str, Any]) -> str:
 
 
 def build_report(output_dir: Path) -> str:
+    started = time.perf_counter()
+    log_event("report.build_start", "Building Markdown report.", level=logging.INFO, output_dir=str(output_dir))
     video = _load_json(output_dir / "video.json", {})
     pages = _load_json(output_dir / "pages.json", [])
     manifest = _load_json(output_dir / "manifest.json", {})
@@ -389,13 +412,34 @@ def build_report(output_dir: Path) -> str:
     if subtitle_languages:
         lines.extend(["", f"本次字幕语言：{', '.join(subtitle_languages)}。"])
     lines.append("")
-    return "\n".join(lines)
+    report = "\n".join(lines)
+    log_event(
+        "report.build_success",
+        "Markdown report built.",
+        level=logging.INFO,
+        output_dir=str(output_dir),
+        bytes=len(report.encode("utf-8")),
+        line_count=len(lines),
+        subtitle_count=subtitle_count,
+        danmaku_count=danmaku_count,
+        comment_count=comment_count,
+        elapsed_ms=round((time.perf_counter() - started) * 1000),
+    )
+    return report
 
 
 def write_report(output_dir: Path) -> Path:
     report = build_report(output_dir)
     path = output_dir / "report.md"
     path.write_text(report, encoding="utf-8")
+    log_event(
+        "report.write_success",
+        "Markdown report written.",
+        level=logging.INFO,
+        output_dir=str(output_dir),
+        path=str(path),
+        bytes=len(report.encode("utf-8")),
+    )
     return path
 
 

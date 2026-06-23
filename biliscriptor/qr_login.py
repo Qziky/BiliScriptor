@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import http.cookiejar
 import json
+import logging
 import sys
 import time
 import urllib.error
@@ -22,6 +23,8 @@ import urllib.parse
 import urllib.request
 import webbrowser
 from pathlib import Path
+
+from .logging_config import add_logging_arguments, configure_logging, log_event, log_exception, sanitize_url, shutdown_logging
 
 
 LOGIN_GENERATE_URL = "https://passport.bilibili.com/x/passport-login/web/qrcode/generate"
@@ -374,15 +377,38 @@ def make_qr_svg(text: str) -> str:
 
 
 def api_get(opener: urllib.request.OpenerDirector, url: str) -> tuple[dict, urllib.response.addinfourl]:
+    started = time.monotonic()
+    log_event("qr_login.api_get_start", "QR login API request started.", level=logging.DEBUG, url=sanitize_url(url))
     request = urllib.request.Request(url, headers=HEADERS)
     with opener.open(request, timeout=20) as resp:
         payload = json.loads(resp.read().decode("utf-8"))
+        log_event(
+            "qr_login.api_get_success",
+            "QR login API request succeeded.",
+            level=logging.DEBUG,
+            url=sanitize_url(url),
+            api_code=payload.get("code"),
+            response_keys=sorted(payload.keys()),
+            elapsed_ms=round((time.monotonic() - started) * 1000),
+        )
         return payload, resp
 
 
 def save_cookie_jar(cookie_jar: http.cookiejar.MozillaCookieJar, cookie_file: Path) -> None:
     cookie_file.parent.mkdir(parents=True, exist_ok=True)
     cookie_jar.save(str(cookie_file), ignore_discard=True, ignore_expires=True)
+    log_event(
+        "qr_login.cookies_saved",
+        "Cookie jar saved.",
+        level=logging.INFO,
+        cookie_file=str(cookie_file),
+        cookie_names=sorted({cookie.name for cookie in cookie_jar}),
+    )
+
+
+def _print_standalone_log_paths(paths: tuple[Path, ...]) -> None:
+    if paths:
+        print(f"Logs: {', '.join(str(path) for path in paths)}")
 
 
 def main() -> int:
@@ -392,7 +418,27 @@ def main() -> int:
     parser.add_argument("--no-open", action="store_true", help="Do not open the QR SVG automatically.")
     parser.add_argument("--generate-only", action="store_true", help="Generate a fresh QR SVG and exit without polling.")
     parser.add_argument("--poll-interval", type=float, default=2.0, help="Seconds between login polls.")
+    add_logging_arguments(parser)
     args = parser.parse_args()
+    logging_config = configure_logging(
+        command="qr-login",
+        log_dir=Path(args.log_dir),
+        log_level=args.log_level,
+        log_format=args.log_format,
+        no_file_log=args.no_file_log,
+        log_to_stderr=args.log_to_stderr,
+    )
+    exit_code = 0
+    log_event(
+        "qr_login.command_start",
+        "Standalone QR login command started.",
+        level=logging.INFO,
+        cookie_file=args.cookie_file,
+        qr_file=args.qr_file,
+        no_open=args.no_open,
+        generate_only=args.generate_only,
+        poll_interval=args.poll_interval,
+    )
 
     cookie_file = Path(args.cookie_file).resolve()
     qr_file = Path(args.qr_file).resolve()
@@ -402,44 +448,100 @@ def main() -> int:
     try:
         generated, _ = api_get(opener, LOGIN_GENERATE_URL)
     except (urllib.error.URLError, TimeoutError) as exc:
+        log_exception("qr_login.generate_failed", exc, "Failed to request login QR.", url=LOGIN_GENERATE_URL)
         print(f"Failed to request login QR: {exc}", file=sys.stderr)
+        exit_code = 1
+        shutdown_logging()
+        _print_standalone_log_paths(logging_config.paths)
         return 1
 
     if generated.get("code") != 0:
+        log_event(
+            "qr_login.generate_api_failed",
+            "Login QR API returned failure.",
+            level=logging.ERROR,
+            api_code=generated.get("code"),
+            message=generated.get("message"),
+        )
         print(f"Login QR API failed: code={generated.get('code')} message={generated.get('message')}", file=sys.stderr)
+        exit_code = 1
+        shutdown_logging()
+        _print_standalone_log_paths(logging_config.paths)
         return 1
 
     data = generated.get("data") or {}
     login_url = data.get("url")
     qrcode_key = data.get("qrcode_key")
     if not login_url or not qrcode_key:
+        log_event(
+            "qr_login.generate_invalid",
+            "Login QR API returned no url/qrcode_key.",
+            level=logging.ERROR,
+            data_keys=sorted(data.keys()),
+        )
         print("Login QR API returned no url/qrcode_key.", file=sys.stderr)
+        exit_code = 1
+        shutdown_logging()
+        _print_standalone_log_paths(logging_config.paths)
         return 1
 
+    qr_file.parent.mkdir(parents=True, exist_ok=True)
     qr_file.write_text(make_qr_svg(login_url), encoding="utf-8")
+    log_event(
+        "qr_login.qr_saved",
+        "Login QR SVG saved.",
+        level=logging.INFO,
+        qr_file=str(qr_file),
+        login_url=sanitize_url(login_url),
+        qrcode_key=qrcode_key,
+        bytes=qr_file.stat().st_size,
+    )
     print(f"QR code saved to: {qr_file}")
     print("Open it and scan with the Bilibili mobile app.")
     if not args.no_open:
         webbrowser.open(qr_file.as_uri())
+        log_event("qr_login.qr_opened", "Login QR SVG opened in browser.", level=logging.INFO, qr_file=str(qr_file))
     if args.generate_only:
+        log_event("qr_login.generate_only_end", "QR login command finished after generation.", level=logging.INFO, exit_code=0)
+        shutdown_logging()
+        _print_standalone_log_paths(logging_config.paths)
         print("Generated only. Run without --generate-only to keep polling and save cookies after confirmation.")
         return 0
 
     poll_url = LOGIN_POLL_URL + "?" + urllib.parse.urlencode({"qrcode_key": qrcode_key})
+    log_event("qr_login.poll_start", "QR login polling started.", level=logging.INFO, poll_url=sanitize_url(poll_url))
     while True:
         time.sleep(max(args.poll_interval, 1.0))
         try:
             polled, _ = api_get(opener, poll_url)
         except (urllib.error.URLError, TimeoutError) as exc:
+            log_exception(
+                "qr_login.poll_failed",
+                exc,
+                "QR login polling failed and will retry.",
+                level=logging.WARNING,
+                poll_url=sanitize_url(poll_url),
+            )
             print(f"Polling failed, will retry: {exc}")
             continue
 
         poll_data = polled.get("data") or {}
         code = poll_data.get("code")
         message = poll_data.get("message") or polled.get("message") or ""
+        log_event("qr_login.poll_status", "QR login poll status received.", level=logging.INFO, code=code, message=message)
         if code == 0:
             save_cookie_jar(cookie_jar, cookie_file)
             names = sorted({cookie.name for cookie in cookie_jar})
+            log_event(
+                "qr_login.success",
+                "QR login succeeded.",
+                level=logging.INFO,
+                cookie_file=str(cookie_file),
+                cookie_names=names,
+                exit_code=0,
+            )
+            shutdown_logging()
+            _print_standalone_log_paths(logging_config.paths)
             print("Login succeeded.")
             print(f"Cookies saved to: {cookie_file}")
             print(f"Saved cookie names: {', '.join(names)}")
@@ -449,9 +551,14 @@ def main() -> int:
         elif code == 86090:
             print("Scanned. Please confirm login on your phone...")
         elif code == 86038:
+            log_event("qr_login.expired", "QR login code expired.", level=logging.WARNING, code=code, message=message)
+            exit_code = 1
+            shutdown_logging()
+            _print_standalone_log_paths(logging_config.paths)
             print("QR code expired. Run this script again.", file=sys.stderr)
             return 1
         else:
+            log_event("qr_login.unexpected_status", "Unexpected QR login poll status.", level=logging.WARNING, code=code, message=message)
             print(f"Unexpected login status: code={code} message={message}")
 
 

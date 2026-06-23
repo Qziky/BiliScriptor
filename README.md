@@ -83,7 +83,7 @@ python -m biliscriptor parse BV1QEVY6jEYv \
   --page 1
 ```
 
-默认运行产物会分目录保存：登录 Cookie 和二维码在 `runtime/`，日志建议写入 `logs/`，解析数据仍输出到 `output/`。
+默认运行产物会分目录保存：登录 Cookie 和二维码在 `runtime/`，详细日志写入 `logs/`，解析数据仍输出到 `output/`。
 
 ## 命令说明
 
@@ -105,6 +105,41 @@ python -m biliscriptor parse BV1QEVY6jEYv --skip-comments --skip-streams
 ```bash
 python -m biliscriptor parse BV1QEVY6jEYv --all-comments --comment-pages 5 --reply-pages 3
 ```
+
+## 日志系统
+
+所有 CLI 命令默认都会生成详细日志，文件名形如：
+
+```text
+logs/20260624-010203-parse-12345.log
+logs/20260624-010203-parse-12345.jsonl
+```
+
+- `.log` 适合直接阅读，`.jsonl` 适合用脚本检索和分析。
+- 默认日志级别是 `DEBUG`，会记录命令启动/结束、阶段状态、HTTP 请求、重试、限速等待、文件写入、报告生成、登录轮询等事件。
+- 控制台仍保持简洁；命令结束时会打印本次日志路径。
+- 日志只记录 URL 路径和查询参数名、响应字节数、状态码、耗时、计数和文件路径，不记录完整响应正文、字幕正文、评论正文或弹幕正文。
+- Cookie 值、`SESSDATA`、`bili_jct`、`DedeUserID`、`qrcode_key`、`csrf`、`token`、`w_rid` 等敏感字段会写成 `<redacted>`。
+
+常用日志参数：
+
+```bash
+python -m biliscriptor parse BV1QEVY6jEYv --log-level INFO
+python -m biliscriptor parse BV1QEVY6jEYv --log-format jsonl
+python -m biliscriptor parse BV1QEVY6jEYv --log-dir my_logs
+python -m biliscriptor parse BV1QEVY6jEYv --log-to-stderr
+python -m biliscriptor parse BV1QEVY6jEYv --no-file-log
+```
+
+排障时优先查看 `.jsonl` 中的结构化事件，例如按 `event`、`stage`、`request_id` 或 `elapsed_ms` 过滤；控制台只保留命令摘要和本次日志路径。
+
+真实解析烟测示例：
+
+```bash
+python -m biliscriptor parse "https://www.bilibili.com/video/BV11kVt6sEWA?"
+```
+
+该命令已用正式接口验证通过，结束摘要为 `Failures: 0`，输出包生成在 `output/BV11kVt6sEWA/`。本次运行会生成一组 `logs/<timestamp>-parse-<pid>.log` 和 `logs/<timestamp>-parse-<pid>.jsonl`；抽检 JSONL 可正常解析，Cookie 只记录名称，不记录值。
 
 ## 输出结构
 

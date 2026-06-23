@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import contextlib
 import io
+import tempfile
 import urllib.error
 from io import BytesIO
 from pathlib import Path
@@ -13,7 +14,9 @@ from biliscriptor.client import BiliApiError, BiliClient, get_mixin_key, normali
 from biliscriptor.cli import build_parser
 from biliscriptor.danmaku_pb import decode_dm_seg_mobile_reply
 from biliscriptor.extractors import fetch_comments, normalize_reply, normalize_subtitle_rows
+from biliscriptor.logging_config import configure_logging, flush_logging, log_event, shutdown_logging
 import biliscriptor.pipeline as pipeline
+import biliscriptor.login as login_module
 from biliscriptor.pipeline import ParseOptions
 from biliscriptor.report import build_report
 from biliscriptor.utils import extract_bvid, write_json, write_jsonl, write_srt
@@ -157,6 +160,7 @@ def test_client_wraps_invalid_json_response() -> None:
 
 
 def test_client_retries_rate_limited_http_error() -> None:
+    config = configure_logging(command="test-client", log_dir=Path(tempfile.gettempdir()) / "biliscriptor-test-logs")
     error = urllib.error.HTTPError(
         "https://example.test/api",
         429,
@@ -173,6 +177,12 @@ def test_client_retries_rate_limited_http_error() -> None:
 
     assert payload["data"]["ok"] is True
     assert opener.calls == 2
+    flush_logging()
+    assert config.jsonl_log is not None
+    events = [json.loads(line)["event"] for line in config.jsonl_log.read_text(encoding="utf-8").splitlines()]
+    assert "client.request_retry" in events
+    assert "client.request_success" in events
+    shutdown_logging()
 
 
 def test_client_retries_http_5xx_even_with_zero_api_code() -> None:
@@ -277,6 +287,68 @@ def test_cli_accepts_zero_rate_limit_and_positive_pages() -> None:
     assert args.reply_pages == 3
     assert args.rate_limit == 0
     assert args.page == 1
+
+
+def test_cli_logging_options_defaults_and_custom_values() -> None:
+    args = build_parser().parse_args(["parse", "BV1QEVY6jEYv"])
+    assert args.log_dir == "logs"
+    assert args.log_level == "DEBUG"
+    assert args.log_format == "both"
+    assert args.no_file_log is False
+    assert args.log_to_stderr is False
+
+    custom = build_parser().parse_args(
+        [
+            "subtitles",
+            "BV1QEVY6jEYv",
+            "--log-dir",
+            "tmp-logs",
+            "--log-level",
+            "INFO",
+            "--log-format",
+            "jsonl",
+            "--no-file-log",
+            "--log-to-stderr",
+        ]
+    )
+    assert custom.log_dir == "tmp-logs"
+    assert custom.log_level == "INFO"
+    assert custom.log_format == "jsonl"
+    assert custom.no_file_log is True
+    assert custom.log_to_stderr is True
+
+
+def test_configure_logging_writes_text_jsonl_and_redacts(tmp_path: Path) -> None:
+    config = configure_logging(command="parse", log_dir=tmp_path)
+    log_event(
+        "test.secret",
+        "SESSDATA=secret-cookie-token qrcode_key=secret-key",
+        url="https://example.test/path?SESSDATA=secret-cookie-token&qrcode_key=secret-key&ok=1",
+        cookie_values={"SESSDATA": "secret-cookie-token"},
+        token="secret-token",
+        normal="visible",
+    )
+    flush_logging()
+
+    assert config.text_log and config.text_log.is_file()
+    assert config.jsonl_log and config.jsonl_log.is_file()
+    text = config.text_log.read_text(encoding="utf-8")
+    jsonl_text = config.jsonl_log.read_text(encoding="utf-8")
+    assert "secret-cookie-token" not in text
+    assert "secret-key" not in text
+    assert "secret-token" not in text
+    assert "secret-cookie-token" not in jsonl_text
+    assert "secret-key" not in jsonl_text
+    assert "secret-token" not in jsonl_text
+
+    rows = [json.loads(line) for line in jsonl_text.splitlines() if line.strip()]
+    assert rows[-1]["event"] == "test.secret"
+    assert rows[-1]["run_id"] == config.run_id
+    assert rows[-1]["command"] == "parse"
+    assert rows[-1]["normal"] == "visible"
+    assert rows[-1]["cookie_values"] == "<redacted>"
+    assert rows[-1]["token"] == "<redacted>"
+    shutdown_logging()
 
 
 def test_subtitle_rows_and_srt(tmp_path: Path) -> None:
@@ -401,6 +473,7 @@ def test_fetch_comments_records_reply_safety_cap() -> None:
 
 
 def test_pipeline_comment_truncation_manifest_fields(tmp_path: Path) -> None:
+    config = configure_logging(command="test-pipeline", log_dir=tmp_path / "logs")
     fake_client = Mock()
     fake_client.cookie_names = []
 
@@ -444,6 +517,61 @@ def test_pipeline_comment_truncation_manifest_fields(tmp_path: Path) -> None:
 
     manifest = json.loads((tmp_path / "BV1QEVY6jEYv" / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["stages"]["comments"]["truncated"] is True
+    flush_logging()
+    assert config.jsonl_log is not None
+    events = [json.loads(line)["event"] for line in config.jsonl_log.read_text(encoding="utf-8").splitlines()]
+    assert "pipeline.parse_start" in events
+    assert "pipeline.stage_status" in events
+    assert "pipeline.manifest_written" in events
+    shutdown_logging()
+
+
+def test_login_logs_status_without_secret_values(tmp_path: Path) -> None:
+    config = configure_logging(command="login", log_dir=tmp_path / "logs")
+    cookie_file = tmp_path / "runtime" / "cookies.txt"
+    qr_file = tmp_path / "runtime" / "login.svg"
+    opener = Mock()
+    payloads = [
+        (
+            {
+                "code": 0,
+                "data": {
+                    "url": "https://passport.example/login?qrcode_key=secret-key&token=secret-token",
+                    "qrcode_key": "secret-key",
+                },
+            },
+            Mock(),
+        ),
+    ]
+
+    with (
+        contextlib.redirect_stdout(io.StringIO()),
+        patch("biliscriptor.login.urllib.request.build_opener", Mock(return_value=opener)),
+        patch("biliscriptor.login.qr_login.api_get", Mock(side_effect=payloads)),
+        patch("biliscriptor.login.qr_login.make_qr_svg", Mock(return_value="<svg></svg>")),
+    ):
+        code = login_module.run_login(
+            cookie_file=cookie_file,
+            qr_file=qr_file,
+            no_open=True,
+            generate_only=True,
+            poll_interval=1.0,
+        )
+
+    assert code == 0
+    flush_logging()
+    assert config.text_log is not None
+    assert config.jsonl_log is not None
+    text = config.text_log.read_text(encoding="utf-8")
+    jsonl_text = config.jsonl_log.read_text(encoding="utf-8")
+    assert "secret-key" not in text
+    assert "secret-token" not in text
+    assert "secret-key" not in jsonl_text
+    assert "secret-token" not in jsonl_text
+    events = [json.loads(line)["event"] for line in jsonl_text.splitlines()]
+    assert "login.qr_saved" in events
+    assert "login.generate_only_end" in events
+    shutdown_logging()
 
 
 def test_build_report(tmp_path: Path) -> None:

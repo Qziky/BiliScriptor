@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
+
+from .logging_config import log_event
 
 
 BV_PATTERN = re.compile(r"(BV[0-9A-Za-z]{10})")
@@ -36,15 +39,37 @@ def normalize_resource_url(url: str) -> str:
 
 def write_json(path: Path, data: Any) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    text = json.dumps(data, ensure_ascii=False, indent=2)
+    path.write_text(text, encoding="utf-8")
+    log_event(
+        "utils.write_json",
+        "JSON file written.",
+        level=logging.DEBUG,
+        path=str(path),
+        bytes=len(text.encode("utf-8")),
+        top_level_type=type(data).__name__,
+    )
     return path
 
 
 def write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
+    row_count = 0
+    byte_count = 0
     with path.open("w", encoding="utf-8") as f:
         for row in rows:
-            f.write(json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n")
+            line = json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n"
+            f.write(line)
+            row_count += 1
+            byte_count += len(line.encode("utf-8"))
+    log_event(
+        "utils.write_jsonl",
+        "JSONL file written.",
+        level=logging.DEBUG,
+        path=str(path),
+        row_count=row_count,
+        bytes=byte_count,
+    )
     return path
 
 
@@ -59,20 +84,41 @@ def seconds_to_srt_time(seconds: float) -> str:
 def write_srt(path: Path, rows: Iterable[dict[str, Any]]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     lines: list[str] = []
+    row_count = 0
     for index, row in enumerate(rows, 1):
+        row_count += 1
         start_ms = int(row.get("start_ms") or 0)
         end_ms = int(row.get("end_ms") or start_ms)
         lines.append(str(index))
         lines.append(f"{seconds_to_srt_time(start_ms / 1000)} --> {seconds_to_srt_time(end_ms / 1000)}")
         lines.append(str(row.get("text") or ""))
         lines.append("")
-    path.write_text("\n".join(lines), encoding="utf-8")
+    text = "\n".join(lines)
+    path.write_text(text, encoding="utf-8")
+    log_event(
+        "utils.write_srt",
+        "SRT file written.",
+        level=logging.DEBUG,
+        path=str(path),
+        row_count=row_count,
+        bytes=len(text.encode("utf-8")),
+    )
     return path
 
 
 def write_txt(path: Path, rows: Iterable[dict[str, Any]]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(str(row.get("text") or "") for row in rows), encoding="utf-8")
+    texts = [str(row.get("text") or "") for row in rows]
+    text = "\n".join(texts)
+    path.write_text(text, encoding="utf-8")
+    log_event(
+        "utils.write_txt",
+        "Text file written.",
+        level=logging.DEBUG,
+        path=str(path),
+        row_count=len(texts),
+        bytes=len(text.encode("utf-8")),
+    )
     return path
 
 

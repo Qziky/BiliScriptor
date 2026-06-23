@@ -32,6 +32,13 @@ class CoreTests(unittest.TestCase):
     def test_cli_accepts_zero_rate_limit_and_positive_pages(self) -> None:
         test_core.test_cli_accepts_zero_rate_limit_and_positive_pages()
 
+    def test_cli_logging_options_defaults_and_custom_values(self) -> None:
+        test_core.test_cli_logging_options_defaults_and_custom_values()
+
+    def test_configure_logging_writes_text_jsonl_and_redacts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            test_core.test_configure_logging_writes_text_jsonl_and_redacts(Path(tmp))
+
     def test_client_parses_http_json_error_body(self) -> None:
         test_core.test_client_parses_http_json_error_body()
 
@@ -66,6 +73,10 @@ class CoreTests(unittest.TestCase):
     def test_pipeline_comment_truncation_manifest_fields(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             test_core.test_pipeline_comment_truncation_manifest_fields(Path(tmp))
+
+    def test_login_logs_status_without_secret_values(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            test_core.test_login_logs_status_without_secret_values(Path(tmp))
 
     def test_build_report(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

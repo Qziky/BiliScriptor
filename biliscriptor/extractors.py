@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 import math
+import time
 from typing import Any
 
 from .client import BiliClient
 from .danmaku_pb import decode_dm_seg_mobile_reply
+from .logging_config import log_event, sanitize_url
 from .utils import normalize_resource_url, safe_name, utc_now_iso
 
 
@@ -19,15 +22,58 @@ REPLY_PAGE_SAFETY_CAP = 500
 
 
 def fetch_video_info(client: BiliClient, bvid: str) -> dict[str, Any]:
-    return client.get_json(VIEW_API, params={"bvid": bvid})["data"]
+    started = time.perf_counter()
+    log_event("extractors.video_info_start", "Fetching video metadata.", level=logging.DEBUG, bvid=bvid)
+    payload = client.get_json(VIEW_API, params={"bvid": bvid})
+    data = payload["data"]
+    pages = list(data.get("pages") or [])
+    log_event(
+        "extractors.video_info_success",
+        "Video metadata fetched.",
+        level=logging.DEBUG,
+        bvid=bvid,
+        aid=data.get("aid"),
+        page_count=len(pages),
+        elapsed_ms=round((time.perf_counter() - started) * 1000),
+    )
+    return data
 
 
 def fetch_player_v2(client: BiliClient, *, bvid: str, aid: int, cid: int) -> dict[str, Any]:
+    started = time.perf_counter()
+    log_event(
+        "extractors.player_start",
+        "Fetching player data.",
+        level=logging.DEBUG,
+        bvid=bvid,
+        aid=aid,
+        cid=cid,
+    )
     payload = client.get_wbi_json(PLAYER_V2_API, {"bvid": bvid, "aid": aid, "cid": cid})
-    return payload.get("data") or {}
+    data = payload.get("data") or {}
+    log_event(
+        "extractors.player_success",
+        "Player data fetched.",
+        level=logging.DEBUG,
+        bvid=bvid,
+        aid=aid,
+        cid=cid,
+        subtitle_count=len(get_subtitle_items(data)),
+        elapsed_ms=round((time.perf_counter() - started) * 1000),
+    )
+    return data
 
 
 def fetch_streams(client: BiliClient, *, bvid: str, cid: int, qn: int = 80) -> dict[str, Any]:
+    started = time.perf_counter()
+    log_event(
+        "extractors.streams_start",
+        "Fetching stream candidates.",
+        level=logging.DEBUG,
+        bvid=bvid,
+        cid=cid,
+        qn=qn,
+    )
     payload = client.get_wbi_json(
         PLAYURL_API,
         {
@@ -40,7 +86,20 @@ def fetch_streams(client: BiliClient, *, bvid: str, cid: int, qn: int = 80) -> d
         },
     )
     data = payload.get("data") or {}
-    return {"raw": data, "summary": summarize_streams(data)}
+    summary = summarize_streams(data)
+    log_event(
+        "extractors.streams_success",
+        "Stream candidates fetched.",
+        level=logging.DEBUG,
+        bvid=bvid,
+        cid=cid,
+        qn=qn,
+        dash_video_count=summary["dash_video_count"],
+        dash_audio_count=summary["dash_audio_count"],
+        durl_count=summary["durl_count"],
+        elapsed_ms=round((time.perf_counter() - started) * 1000),
+    )
+    return {"raw": data, "summary": summary}
 
 
 def summarize_streams(data: dict[str, Any]) -> dict[str, Any]:
@@ -108,6 +167,7 @@ def normalize_subtitle_rows(
     page_index: int,
     cid: int,
 ) -> list[dict[str, Any]]:
+    started = time.perf_counter()
     source = subtitle_source(item)
     language = item.get("lan") or ""
     fetched_at = utc_now_iso()
@@ -135,6 +195,20 @@ def normalize_subtitle_rows(
                 "text": str(row.get("content") or "").replace("\r\n", "\n").strip(),
             }
         )
+    log_event(
+        "extractors.subtitle_normalized",
+        "Subtitle rows normalized.",
+        level=logging.DEBUG,
+        bvid=bvid,
+        aid=aid,
+        page_index=page_index,
+        cid=cid,
+        language=language,
+        source=source,
+        input_count=len(body),
+        event_count=len(rows),
+        elapsed_ms=round((time.perf_counter() - started) * 1000),
+    )
     return rows
 
 
@@ -145,7 +219,26 @@ def fetch_subtitle(
     bvid: str,
 ) -> dict[str, Any]:
     url = normalize_resource_url(subtitle_url)
-    return client.get_json(url, referer=f"https://www.bilibili.com/video/{bvid}/", accept_api_code=True)
+    started = time.perf_counter()
+    log_event(
+        "extractors.subtitle_start",
+        "Fetching subtitle payload.",
+        level=logging.DEBUG,
+        bvid=bvid,
+        subtitle_url=sanitize_url(url),
+    )
+    payload = client.get_json(url, referer=f"https://www.bilibili.com/video/{bvid}/", accept_api_code=True)
+    body = payload.get("body") or []
+    log_event(
+        "extractors.subtitle_success",
+        "Subtitle payload fetched.",
+        level=logging.DEBUG,
+        bvid=bvid,
+        subtitle_url=sanitize_url(url),
+        event_count=len(body) if isinstance(body, list) else None,
+        elapsed_ms=round((time.perf_counter() - started) * 1000),
+    )
+    return payload
 
 
 def subtitle_stem(page_index: int, item_index: int, item: dict[str, Any]) -> str:
@@ -162,16 +255,42 @@ def fetch_danmaku(
     page_index: int,
     duration: int,
 ) -> list[dict[str, Any]]:
+    started = time.perf_counter()
     segment_count = max(1, math.ceil(max(duration, 1) / 360))
     rows: list[dict[str, Any]] = []
     fetched_at = utc_now_iso()
+    log_event(
+        "extractors.danmaku_start",
+        "Fetching danmaku segments.",
+        level=logging.DEBUG,
+        bvid=bvid,
+        aid=aid,
+        cid=cid,
+        page_index=page_index,
+        duration=duration,
+        segment_count=segment_count,
+    )
     for segment_index in range(1, segment_count + 1):
+        segment_started = time.perf_counter()
         raw = client.get_bytes(
             DM_SEG_API,
             params={"type": 1, "oid": cid, "pid": aid, "segment_index": segment_index},
             referer=f"https://www.bilibili.com/video/{bvid}/",
         )
         elems = decode_dm_seg_mobile_reply(raw)
+        log_event(
+            "extractors.danmaku_segment_success",
+            "Danmaku segment decoded.",
+            level=logging.DEBUG,
+            bvid=bvid,
+            aid=aid,
+            cid=cid,
+            page_index=page_index,
+            segment_index=segment_index,
+            raw_bytes=len(raw),
+            event_count=len(elems),
+            elapsed_ms=round((time.perf_counter() - segment_started) * 1000),
+        )
         for elem in elems:
             progress = int(elem.get("progress") or 0)
             rows.append(
@@ -200,6 +319,18 @@ def fetch_danmaku(
                 }
             )
     rows.sort(key=lambda item: (item.get("start_ms") or 0, str(item.get("dmid") or "")))
+    log_event(
+        "extractors.danmaku_success",
+        "Danmaku rows normalized.",
+        level=logging.DEBUG,
+        bvid=bvid,
+        aid=aid,
+        cid=cid,
+        page_index=page_index,
+        segment_count=segment_count,
+        event_count=len(rows),
+        elapsed_ms=round((time.perf_counter() - started) * 1000),
+    )
     return rows
 
 
@@ -253,14 +384,34 @@ def fetch_comments(
     reply_pages: int,
     all_comments: bool,
 ) -> dict[str, Any]:
+    started = time.perf_counter()
     fetched_at = utc_now_iso()
     flat: list[dict[str, Any]] = []
     tree: list[dict[str, Any]] = []
     truncations: list[dict[str, Any]] = []
     hot_seen: set[int] = set()
     pn = 1
+    log_event(
+        "extractors.comments_start",
+        "Fetching comments.",
+        level=logging.DEBUG,
+        bvid=bvid,
+        aid=aid,
+        comment_pages=comment_pages,
+        reply_pages=reply_pages,
+        all_comments=all_comments,
+    )
     while True:
         if not all_comments and pn > comment_pages:
+            log_event(
+                "extractors.comments_page_limit",
+                "Comment page limit reached.",
+                level=logging.DEBUG,
+                bvid=bvid,
+                aid=aid,
+                next_page=pn,
+                comment_pages=comment_pages,
+            )
             break
         if pn > COMMENT_PAGE_SAFETY_CAP:
             truncations.append(
@@ -270,7 +421,17 @@ def fetch_comments(
                     "next_page": pn,
                 }
             )
+            log_event(
+                "extractors.comments_safety_cap",
+                "Comment safety cap reached.",
+                level=logging.WARNING,
+                bvid=bvid,
+                aid=aid,
+                cap_pages=COMMENT_PAGE_SAFETY_CAP,
+                next_page=pn,
+            )
             break
+        page_started = time.perf_counter()
         payload = client.get_json(
             REPLY_API,
             params={"oid": aid, "type": 1, "pn": pn, "ps": 20, "sort": 2},
@@ -296,6 +457,17 @@ def fetch_comments(
                     )
                 )
         replies = list(data.get("replies") or [])
+        log_event(
+            "extractors.comments_page_success",
+            "Comment page fetched.",
+            level=logging.DEBUG,
+            bvid=bvid,
+            aid=aid,
+            page=pn,
+            reply_count=len(replies),
+            hot_count=len(data.get("hots") or []) if pn == 1 else 0,
+            elapsed_ms=round((time.perf_counter() - page_started) * 1000),
+        )
         if not replies:
             break
         for reply in replies:
@@ -328,6 +500,17 @@ def fetch_comments(
         if count and pn >= math.ceil(count / max(size, 1)):
             break
         pn += 1
+    log_event(
+        "extractors.comments_success",
+        "Comments normalized.",
+        level=logging.DEBUG,
+        bvid=bvid,
+        aid=aid,
+        comment_count=len(flat),
+        tree_count=len(tree),
+        truncation_count=len(truncations),
+        elapsed_ms=round((time.perf_counter() - started) * 1000),
+    )
     return {"comments": flat, "tree": tree, "truncations": truncations}
 
 
@@ -363,12 +546,39 @@ def _fetch_reply_children_result(
     all_comments: bool,
 ) -> dict[str, list[dict[str, Any]]]:
     if not root_rpid:
+        log_event(
+            "extractors.comment_children_skip",
+            "Skipping child comments because root rpid is empty.",
+            level=logging.DEBUG,
+            bvid=bvid,
+            aid=aid,
+        )
         return {"replies": [], "truncations": []}
     children: list[dict[str, Any]] = []
     truncations: list[dict[str, Any]] = []
     pn = 1
+    log_event(
+        "extractors.comment_children_start",
+        "Fetching child comments.",
+        level=logging.DEBUG,
+        bvid=bvid,
+        aid=aid,
+        root_rpid=root_rpid,
+        reply_pages=reply_pages,
+        all_comments=all_comments,
+    )
     while True:
         if not all_comments and pn > reply_pages:
+            log_event(
+                "extractors.comment_children_page_limit",
+                "Child comment page limit reached.",
+                level=logging.DEBUG,
+                bvid=bvid,
+                aid=aid,
+                root_rpid=root_rpid,
+                next_page=pn,
+                reply_pages=reply_pages,
+            )
             break
         if pn > REPLY_PAGE_SAFETY_CAP:
             truncations.append(
@@ -379,7 +589,18 @@ def _fetch_reply_children_result(
                     "root_rpid": root_rpid,
                 }
             )
+            log_event(
+                "extractors.comment_children_safety_cap",
+                "Child comment safety cap reached.",
+                level=logging.WARNING,
+                bvid=bvid,
+                aid=aid,
+                root_rpid=root_rpid,
+                cap_pages=REPLY_PAGE_SAFETY_CAP,
+                next_page=pn,
+            )
             break
+        page_started = time.perf_counter()
         payload = client.get_json(
             REPLY_REPLIES_API,
             params={"oid": aid, "type": 1, "root": root_rpid, "pn": pn, "ps": 20},
@@ -387,6 +608,17 @@ def _fetch_reply_children_result(
         )
         data = payload.get("data") or {}
         replies = list(data.get("replies") or [])
+        log_event(
+            "extractors.comment_children_page_success",
+            "Child comment page fetched.",
+            level=logging.DEBUG,
+            bvid=bvid,
+            aid=aid,
+            root_rpid=root_rpid,
+            page=pn,
+            reply_count=len(replies),
+            elapsed_ms=round((time.perf_counter() - page_started) * 1000),
+        )
         if not replies:
             break
         for reply in replies:
@@ -407,4 +639,14 @@ def _fetch_reply_children_result(
         if count and pn >= math.ceil(count / max(size, 1)):
             break
         pn += 1
+    log_event(
+        "extractors.comment_children_success",
+        "Child comments normalized.",
+        level=logging.DEBUG,
+        bvid=bvid,
+        aid=aid,
+        root_rpid=root_rpid,
+        reply_count=len(children),
+        truncation_count=len(truncations),
+    )
     return {"replies": children, "truncations": truncations}

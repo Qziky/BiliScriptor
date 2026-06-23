@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import http.cookiejar
 import json
+import logging
 import time
 import urllib.error
 import urllib.parse
@@ -10,6 +11,8 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from .logging_config import log_event, log_exception, new_request_id, sanitize_mapping_keys, sanitize_url
 
 
 HEADERS = {
@@ -120,6 +123,16 @@ class BiliClient:
         if cookie_file and cookie_file.exists():
             self.cookie_jar.load(str(cookie_file), ignore_discard=True, ignore_expires=True)
         self.opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(self.cookie_jar))
+        log_event(
+            "client.created",
+            "BiliClient created.",
+            level=logging.DEBUG,
+            cookie_file=str(cookie_file) if cookie_file else None,
+            cookie_names=self.cookie_names,
+            rate_limit=self.rate_limit,
+            timeout=self.timeout,
+            max_retries=self.max_retries,
+        )
 
     @property
     def cookie_names(self) -> list[str]:
@@ -128,11 +141,27 @@ class BiliClient:
     def _throttle(self) -> None:
         elapsed = time.monotonic() - self._last_request_at
         if elapsed < self.rate_limit:
-            time.sleep(self.rate_limit - elapsed)
+            wait_seconds = self.rate_limit - elapsed
+            log_event(
+                "client.throttle_wait",
+                "Waiting for request rate limit.",
+                level=logging.DEBUG,
+                wait_ms=round(wait_seconds * 1000),
+                rate_limit=self.rate_limit,
+            )
+            time.sleep(wait_seconds)
         self._last_request_at = time.monotonic()
 
     def _retry_delay(self, attempt: int) -> None:
-        time.sleep(min(2.0, 0.5 * (2 ** attempt)))
+        delay = min(2.0, 0.5 * (2 ** attempt))
+        log_event(
+            "client.retry_wait",
+            "Waiting before retry.",
+            level=logging.DEBUG,
+            attempt=attempt + 1,
+            delay_ms=round(delay * 1000),
+        )
+        time.sleep(delay)
 
     @staticmethod
     def _should_retry_error(error: BiliApiError) -> bool:
@@ -140,15 +169,41 @@ class BiliClient:
             return True
         return isinstance(error.code, int) and 500 <= error.code <= 599
 
-    def _request_once(self, url: str, *, referer: str | None = None) -> bytes:
+    def _request_once(self, url: str, *, referer: str | None = None, request_id: str, attempt: int) -> bytes:
         self._throttle()
         headers = dict(HEADERS)
         if referer:
             headers["Referer"] = referer
         request = urllib.request.Request(url, headers=headers)
+        parsed = urllib.parse.urlsplit(url)
+        query_keys = sorted(urllib.parse.parse_qs(parsed.query, keep_blank_values=True))
+        started = time.perf_counter()
+        log_event(
+            "client.request_start",
+            "HTTP request started.",
+            level=logging.DEBUG,
+            request_id=request_id,
+            attempt=attempt + 1,
+            url=sanitize_url(url),
+            endpoint=urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", "")),
+            query_keys=query_keys,
+            referer=referer,
+            timeout=self.timeout,
+        )
         try:
             with self.opener.open(request, timeout=self.timeout) as response:
-                return response.read()
+                raw = response.read()
+                log_event(
+                    "client.request_success",
+                    "HTTP request succeeded.",
+                    level=logging.DEBUG,
+                    request_id=request_id,
+                    attempt=attempt + 1,
+                    url=sanitize_url(url),
+                    elapsed_ms=round((time.perf_counter() - started) * 1000),
+                    response_bytes=len(raw),
+                )
+                return raw
         except urllib.error.HTTPError as exc:
             try:
                 raw = exc.read()
@@ -163,21 +218,78 @@ class BiliClient:
                     message = _message_from_payload(payload, message)
                 except BiliApiError:
                     pass
-            raise BiliApiError(normalize_error_status(code, exc.code), code, message, url) from exc
+            error = BiliApiError(normalize_error_status(code, exc.code), code, message, url)
+            log_exception(
+                "client.request_http_error",
+                error,
+                "HTTP request returned an error response.",
+                level=logging.WARNING,
+                request_id=request_id,
+                attempt=attempt + 1,
+                url=sanitize_url(url),
+                http_status=exc.code,
+                api_code=code,
+                status=error.status,
+                elapsed_ms=round((time.perf_counter() - started) * 1000),
+                response_bytes=len(raw or b""),
+            )
+            raise error from exc
         except (urllib.error.URLError, TimeoutError) as exc:
-            raise BiliApiError("network_failed", None, str(exc), url) from exc
+            error = BiliApiError("network_failed", None, str(exc), url)
+            log_exception(
+                "client.request_network_error",
+                error,
+                "HTTP request failed before receiving a response.",
+                level=logging.WARNING,
+                request_id=request_id,
+                attempt=attempt + 1,
+                url=sanitize_url(url),
+                status=error.status,
+                elapsed_ms=round((time.perf_counter() - started) * 1000),
+            )
+            raise error from exc
 
     def _request(self, url: str, *, referer: str | None = None) -> bytes:
+        request_id = new_request_id()
         for attempt in range(self.max_retries + 1):
             try:
-                return self._request_once(url, referer=referer)
+                return self._request_once(url, referer=referer, request_id=request_id, attempt=attempt)
             except BiliApiError as exc:
                 if attempt >= self.max_retries or not self._should_retry_error(exc):
+                    log_event(
+                        "client.request_give_up",
+                        "HTTP request will not be retried.",
+                        level=logging.DEBUG,
+                        request_id=request_id,
+                        attempt=attempt + 1,
+                        status=exc.status,
+                        code=exc.code,
+                        url=sanitize_url(url),
+                    )
                     raise
+                log_event(
+                    "client.request_retry",
+                    "HTTP request scheduled for retry.",
+                    level=logging.INFO,
+                    request_id=request_id,
+                    attempt=attempt + 1,
+                    next_attempt=attempt + 2,
+                    status=exc.status,
+                    code=exc.code,
+                    url=sanitize_url(url),
+                )
                 self._retry_delay(attempt)
         raise RuntimeError("unreachable request retry state")
 
     def get_bytes(self, url: str, *, params: dict[str, Any] | None = None, referer: str | None = None) -> bytes:
+        log_event(
+            "client.get_bytes",
+            "Preparing byte request.",
+            level=logging.DEBUG,
+            url=sanitize_url(url),
+            param_keys=sanitize_mapping_keys(params),
+            referer=referer,
+        )
         if params:
             url += "?" + urllib.parse.urlencode(params, quote_via=urllib.parse.quote)
         return self._request(url, referer=referer)
@@ -191,15 +303,48 @@ class BiliClient:
         accept_api_code: bool = False,
     ) -> dict[str, Any]:
         raw = self.get_bytes(url, params=params, referer=referer)
-        payload = _decode_json_payload(raw, url)
+        try:
+            payload = _decode_json_payload(raw, url)
+        except BiliApiError as exc:
+            log_exception(
+                "client.json_decode_failed",
+                exc,
+                "Failed to decode JSON response.",
+                url=sanitize_url(url),
+                response_bytes=len(raw),
+            )
+            raise
         code = payload.get("code")
         if accept_api_code or code is None or code == 0:
+            log_event(
+                "client.get_json_success",
+                "JSON API response accepted.",
+                level=logging.DEBUG,
+                url=sanitize_url(url),
+                param_keys=sanitize_mapping_keys(params),
+                api_code=code,
+                accept_api_code=accept_api_code,
+                response_keys=sanitize_mapping_keys(payload),
+            )
             return payload
-        raise BiliApiError(normalize_error_status(code), code, _message_from_payload(payload), url)
+        error = BiliApiError(normalize_error_status(code), code, _message_from_payload(payload), url)
+        log_exception(
+            "client.api_error",
+            error,
+            "JSON API response reported failure.",
+            level=logging.WARNING,
+            url=sanitize_url(url),
+            param_keys=sanitize_mapping_keys(params),
+            api_code=code,
+            status=error.status,
+        )
+        raise error
 
     def get_wbi_keys(self, *, refresh: bool = False) -> tuple[str, str]:
         if self._wbi_keys and not refresh:
+            log_event("client.wbi_keys_cache_hit", "Using cached WBI keys.", level=logging.DEBUG)
             return self._wbi_keys
+        log_event("client.wbi_keys_fetch", "Fetching WBI keys.", level=logging.DEBUG, refresh=refresh)
         payload = self.get_json("https://api.bilibili.com/x/web-interface/nav", accept_api_code=True)
         wbi_img = ((payload.get("data") or {}).get("wbi_img") or {})
         img_url = wbi_img.get("img_url") or ""
@@ -207,16 +352,34 @@ class BiliClient:
         img_key = Path(urllib.parse.urlparse(img_url).path).stem
         sub_key = Path(urllib.parse.urlparse(sub_url).path).stem
         if not img_key or not sub_key:
-            raise BiliApiError("wbi_key_failed", payload.get("code"), "Failed to obtain WBI keys.", "nav")
+            error = BiliApiError("wbi_key_failed", payload.get("code"), "Failed to obtain WBI keys.", "nav")
+            log_exception("client.wbi_keys_failed", error, "Failed to obtain WBI keys.")
+            raise error
         self._wbi_keys = (img_key, sub_key)
+        log_event("client.wbi_keys_success", "WBI keys fetched.", level=logging.DEBUG, refresh=refresh, key_count=2)
         return self._wbi_keys
 
     def get_wbi_json(self, url: str, params: dict[str, Any], *, referer: str | None = None) -> dict[str, Any]:
         for refresh in (False, True):
+            log_event(
+                "client.wbi_request_sign",
+                "Preparing WBI signed request.",
+                level=logging.DEBUG,
+                url=sanitize_url(url),
+                param_keys=sanitize_mapping_keys(params),
+                refresh=refresh,
+            )
             img_key, sub_key = self.get_wbi_keys(refresh=refresh)
             signed = sign_wbi(params, img_key, sub_key)
             payload = self.get_json(url, params=signed, referer=referer)
             data = payload.get("data")
             if not (isinstance(data, dict) and "v_voucher" in data):
                 return payload
+            log_event(
+                "client.wbi_voucher",
+                "WBI response contained v_voucher; refreshing keys.",
+                level=logging.WARNING,
+                url=sanitize_url(url),
+                refresh=refresh,
+            )
         raise BiliApiError("risk_control", "v_voucher", "WBI signing or risk control failed.", url)

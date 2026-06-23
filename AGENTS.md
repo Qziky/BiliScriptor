@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-BiliScriptor is a Python 3.10+ CLI package. Source code lives in `biliscriptor/`: `cli.py` defines commands, `pipeline.py` coordinates parsing, `client.py` handles Bilibili API requests, `extractors.py` normalizes API data, and `report.py` renders Markdown output. `biliscriptor/__main__.py` supports `python -m biliscriptor`. Tests are in `tests/`, with pytest-style functions in `test_core.py` and a unittest compatibility wrapper in `test_unittest.py`. Reference notes are kept in `B站视频解析百科.md`.
+BiliScriptor is a Python 3.10+ CLI package. Source code lives in `biliscriptor/`: `cli.py` defines commands, `pipeline.py` coordinates parsing, `client.py` handles Bilibili API requests, `extractors.py` normalizes API data, `report.py` renders Markdown output, and `logging_config.py` configures detailed text/JSONL run logs with redaction helpers. `biliscriptor/__main__.py` supports `python -m biliscriptor`. Tests are in `tests/`, with pytest-style functions in `test_core.py` and a unittest compatibility wrapper in `test_unittest.py`. Reference notes are kept in `B站视频解析百科.md`.
 
 ## Build, Test, and Development Commands
 
@@ -21,6 +21,12 @@ python -m biliscriptor report output/BV1QEVY6jEYv
 python -m biliscriptor login
 ```
 
+For a manual live parse smoke test, use a real Bilibili URL and verify the command summary, output package, and generated logs:
+
+```bash
+python -m biliscriptor parse "https://www.bilibili.com/video/BV11kVt6sEWA?"
+```
+
 Run tests with either supported runner:
 
 ```bash
@@ -34,7 +40,7 @@ Follow the existing Python style: 4-space indentation, type annotations where pr
 
 ## Testing Guidelines
 
-Add tests for parsing, normalization, report generation, and CLI argument behavior. Name pytest tests `test_<behavior>` and place them in `tests/test_core.py` unless a new area grows large enough for its own file. Use `tmp_path` or `tempfile.TemporaryDirectory()` for generated output. Tests should avoid live network calls; mock or construct representative API payloads instead.
+Add tests for parsing, normalization, report generation, logging, and CLI argument behavior. Name pytest tests `test_<behavior>` and place them in `tests/test_core.py` unless a new area grows large enough for its own file. Use `tmp_path` or `tempfile.TemporaryDirectory()` for generated output. Automated tests should avoid live network calls; use mocks, fake openers, or representative API payloads instead. Treat real network parsing as a manual smoke test only.
 
 ## Commit & Pull Request Guidelines
 
@@ -42,4 +48,4 @@ The current history uses short Chinese commit subjects, for example `初始化`.
 
 ## Security & Configuration Tips
 
-Do not commit `bilibili_cookies.txt`, generated `output/` data, or secrets from manifests/logs. Preserve the existing behavior that avoids writing cookie values into reports or manifests.
+Do not commit `bilibili_cookies.txt`, generated `output/` data, `runtime/`, `logs/`, or secrets from manifests/logs. Logs may record cookie names, URL paths, parameter keys, statuses, timings, counts, file paths, and sanitized errors, but must not record cookie values, QR code keys, tokens, csrf values, WBI signatures, full response bodies, subtitle text, comment text, or danmaku text. Preserve the existing behavior that avoids writing cookie values into reports, manifests, or logs.
