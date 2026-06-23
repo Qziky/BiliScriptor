@@ -16,7 +16,7 @@
 </p>
 
 <p align="center">
-  <img src="assets/hero.svg" alt="BiliScriptor hero illustration" />
+  <img src="assets/hero-generated-v2.png" alt="BiliScriptor hero illustration" />
 </p>
 
 <p align="center">
