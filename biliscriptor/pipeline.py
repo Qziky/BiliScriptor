@@ -99,7 +99,7 @@ def parse_video(options: ParseOptions) -> ParseResult:
     client = BiliClient(cookie_file if cookie_file.exists() else None, rate_limit=options.rate_limit)
     manifest: dict[str, Any] = {
         "schema_version": "1.0",
-        "tool": "bili-md",
+        "tool": "BiliScriptor",
         "tool_version": TOOL_VERSION,
         "bvid": bvid,
         "input": options.url_or_bvid,

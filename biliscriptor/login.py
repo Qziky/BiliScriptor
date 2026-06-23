@@ -8,6 +8,8 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 
+from . import qr_login
+
 
 def run_login(
     *,
@@ -17,19 +19,13 @@ def run_login(
     generate_only: bool = False,
     poll_interval: float = 2.0,
 ) -> int:
-    try:
-        import login_bilibili_qr as legacy
-    except ImportError:
-        print("login_bilibili_qr.py was not found; cannot run QR login.", file=sys.stderr)
-        return 1
-
     cookie_file = cookie_file.resolve()
     qr_file = qr_file.resolve()
     cookie_jar = http.cookiejar.MozillaCookieJar(str(cookie_file))
     opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar))
 
     try:
-        generated, _ = legacy.api_get(opener, legacy.LOGIN_GENERATE_URL)
+        generated, _ = qr_login.api_get(opener, qr_login.LOGIN_GENERATE_URL)
     except Exception as exc:  # noqa: BLE001
         print(f"Failed to request login QR: {exc}", file=sys.stderr)
         return 1
@@ -48,7 +44,7 @@ def run_login(
         print("Login QR API returned no url/qrcode_key.", file=sys.stderr)
         return 1
 
-    qr_file.write_text(legacy.make_qr_svg(login_url), encoding="utf-8")
+    qr_file.write_text(qr_login.make_qr_svg(login_url), encoding="utf-8")
     print(f"QR code saved to: {qr_file}")
     print("Open it and scan with the Bilibili mobile app.")
     if not no_open:
@@ -57,11 +53,11 @@ def run_login(
         print("Generated only. Run without --generate-only to keep polling and save cookies after confirmation.")
         return 0
 
-    poll_url = legacy.LOGIN_POLL_URL + "?" + urllib.parse.urlencode({"qrcode_key": qrcode_key})
+    poll_url = qr_login.LOGIN_POLL_URL + "?" + urllib.parse.urlencode({"qrcode_key": qrcode_key})
     while True:
         time.sleep(max(poll_interval, 1.0))
         try:
-            polled, _ = legacy.api_get(opener, poll_url)
+            polled, _ = qr_login.api_get(opener, poll_url)
         except Exception as exc:  # noqa: BLE001
             print(f"Polling failed, will retry: {exc}")
             continue
@@ -70,7 +66,7 @@ def run_login(
         code = poll_data.get("code")
         message = poll_data.get("message") or polled.get("message") or ""
         if code == 0:
-            legacy.save_cookie_jar(cookie_jar, cookie_file)
+            qr_login.save_cookie_jar(cookie_jar, cookie_file)
             names = sorted({cookie.name for cookie in cookie_jar})
             print("Login succeeded.")
             print(f"Cookies saved to: {cookie_file}")

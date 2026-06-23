@@ -20,6 +20,9 @@ class CoreTests(unittest.TestCase):
     def test_default_comment_depth_is_conservative(self) -> None:
         test_core.test_default_comment_depth_is_conservative()
 
+    def test_subtitles_command_exists(self) -> None:
+        test_core.test_subtitles_command_exists()
+
     def test_subtitle_rows_and_srt(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             test_core.test_subtitle_rows_and_srt(Path(tmp))

@@ -1,0 +1,79 @@
+<svg width="1440" height="560" viewBox="0 0 1440 560" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">BiliScriptor Hero</title>
+  <desc id="desc">A polished illustration of a local Bilibili parsing workflow becoming Markdown-ready data.</desc>
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="1440" y2="560" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F7FCFF"/>
+      <stop offset="0.38" stop-color="#EAF7FF"/>
+      <stop offset="1" stop-color="#F5F0FF"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="201" y1="82" x2="1036" y2="502" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#ECFAFF"/>
+    </linearGradient>
+    <linearGradient id="blue" x1="376" y1="138" x2="1115" y2="442" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#18C8E8"/>
+      <stop offset="0.51" stop-color="#4D7DFF"/>
+      <stop offset="1" stop-color="#8D5BFF"/>
+    </linearGradient>
+    <linearGradient id="pink" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#FF7AB8"/>
+      <stop offset="1" stop-color="#FFB15E"/>
+    </linearGradient>
+    <filter id="softShadow" x="120" y="44" width="1199" height="476" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="24" stdDeviation="28" flood-color="#233076" flood-opacity="0.16"/>
+    </filter>
+    <filter id="cardShadow" x="0" y="0" width="200%" height="200%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="12" stdDeviation="13" flood-color="#25316C" flood-opacity="0.12"/>
+    </filter>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0H0V32" stroke="#DCEBFF" stroke-opacity="0.7" stroke-width="1"/>
+    </pattern>
+  </defs>
+  <rect width="1440" height="560" fill="url(#sky)"/>
+  <rect width="1440" height="560" fill="url(#grid)" opacity="0.55"/>
+  <path d="M92 420C233 323 350 354 476 397C622 447 739 488 911 381C1075 279 1201 289 1348 366" stroke="#B7DDF7" stroke-width="5" stroke-linecap="round" opacity="0.45"/>
+  <g filter="url(#softShadow)">
+    <rect x="174" y="86" width="1092" height="388" rx="34" fill="url(#panel)" stroke="#FFFFFF" stroke-width="3"/>
+  </g>
+  <rect x="218" y="130" width="338" height="298" rx="22" fill="#111B3F"/>
+  <rect x="218" y="130" width="338" height="46" rx="22" fill="#1B2754"/>
+  <circle cx="252" cy="153" r="7" fill="#FF6D8B"/>
+  <circle cx="276" cy="153" r="7" fill="#FFD166"/>
+  <circle cx="300" cy="153" r="7" fill="#4BE4A4"/>
+  <text x="246" y="218" fill="#78F0FF" font-family="Consolas, Menlo, monospace" font-size="24" font-weight="700">$ biliscriptor parse</text>
+  <text x="246" y="260" fill="#D7E3FF" font-family="Consolas, Menlo, monospace" font-size="22">BV1QEVY6jEYv</text>
+  <rect x="246" y="295" width="246" height="16" rx="8" fill="#263466"/>
+  <rect x="246" y="295" width="188" height="16" rx="8" fill="#28D4ED"/>
+  <rect x="246" y="335" width="206" height="12" rx="6" fill="#5C6FA9"/>
+  <rect x="246" y="362" width="240" height="12" rx="6" fill="#5C6FA9"/>
+  <rect x="246" y="389" width="154" height="12" rx="6" fill="#5C6FA9"/>
+  <path d="M594 278C657 278 672 206 735 206H779" stroke="url(#blue)" stroke-width="12" stroke-linecap="round"/>
+  <path d="M594 304C659 304 682 372 748 372H792" stroke="#FF8FBF" stroke-width="12" stroke-linecap="round"/>
+  <g filter="url(#cardShadow)">
+    <rect x="790" y="132" width="410" height="296" rx="28" fill="#FFFFFF"/>
+  </g>
+  <rect x="822" y="166" width="176" height="24" rx="12" fill="#D7F7FF"/>
+  <rect x="822" y="210" width="330" height="14" rx="7" fill="#DDE7F6"/>
+  <rect x="822" y="242" width="274" height="14" rx="7" fill="#DDE7F6"/>
+  <rect x="822" y="274" width="300" height="14" rx="7" fill="#DDE7F6"/>
+  <rect x="822" y="324" width="104" height="34" rx="17" fill="#E9FBFF"/>
+  <rect x="944" y="324" width="92" height="34" rx="17" fill="#FFF0F6"/>
+  <rect x="1054" y="324" width="102" height="34" rx="17" fill="#F1ECFF"/>
+  <text x="846" y="350" fill="#157B99" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="700">JSONL</text>
+  <text x="973" y="350" fill="#C74B83" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="700">SRT</text>
+  <text x="1080" y="350" fill="#704CDE" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="700">MD</text>
+  <path d="M838 389H1152" stroke="#EEF3FB" stroke-width="5" stroke-linecap="round"/>
+  <path d="M850 389C893 345 938 398 982 366C1026 334 1071 348 1137 300" stroke="url(#pink)" stroke-width="8" stroke-linecap="round"/>
+  <circle cx="1137" cy="300" r="10" fill="#FF7AB8" stroke="#FFFFFF" stroke-width="5"/>
+  <g transform="translate(640 154)">
+    <rect x="0" y="0" width="104" height="104" rx="28" fill="url(#blue)"/>
+    <path d="M31 23L42 36M74 23L63 36" stroke="#E8FBFF" stroke-width="6" stroke-linecap="round"/>
+    <rect x="22" y="36" width="60" height="42" rx="13" fill="#FFFFFF"/>
+    <circle cx="42" cy="57" r="4.5" fill="#3556CE"/>
+    <circle cx="62" cy="57" r="4.5" fill="#3556CE"/>
+    <path d="M39 70C45 75 59 75 65 70" stroke="#3556CE" stroke-width="4" stroke-linecap="round"/>
+  </g>
+  <text x="641" y="294" fill="#24315E" font-family="Inter, Arial, sans-serif" font-size="34" font-weight="800">BiliScriptor</text>
+  <text x="641" y="329" fill="#617098" font-family="Inter, Arial, sans-serif" font-size="20">Bilibili data packages, ready for Markdown workflows</text>
+</svg>

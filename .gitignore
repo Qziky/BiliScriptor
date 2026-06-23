@@ -38,3 +38,6 @@ output_*/
 Thumbs.db
 .idea/
 .vscode/
+
+# Local Codex/agent workspace metadata
+.agents/

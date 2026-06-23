@@ -3,13 +3,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from bili_md.client import get_mixin_key, normalize_error_status, sign_wbi
-from bili_md.cli import build_parser
-from bili_md.danmaku_pb import decode_dm_seg_mobile_reply
-from bili_md.extractors import normalize_reply, normalize_subtitle_rows
-from bili_md.pipeline import ParseOptions
-from bili_md.report import build_report
-from bili_md.utils import extract_bvid, write_json, write_jsonl, write_srt
+from biliscriptor.client import get_mixin_key, normalize_error_status, sign_wbi
+from biliscriptor.cli import build_parser
+from biliscriptor.danmaku_pb import decode_dm_seg_mobile_reply
+from biliscriptor.extractors import normalize_reply, normalize_subtitle_rows
+from biliscriptor.pipeline import ParseOptions
+from biliscriptor.report import build_report
+from biliscriptor.utils import extract_bvid, write_json, write_jsonl, write_srt
 
 
 def _varint(value: int) -> bytes:
@@ -62,6 +62,13 @@ def test_default_comment_depth_is_conservative() -> None:
     args = build_parser().parse_args(["parse", "BV1QEVY6jEYv"])
     assert args.comment_pages == 1
     assert args.reply_pages == 1
+
+
+def test_subtitles_command_exists() -> None:
+    args = build_parser().parse_args(["subtitles", "BV1QEVY6jEYv", "--page", "1"])
+    assert args.command == "subtitles"
+    assert args.url_or_bvid == "BV1QEVY6jEYv"
+    assert args.page == 1
 
 
 def test_subtitle_rows_and_srt(tmp_path: Path) -> None:

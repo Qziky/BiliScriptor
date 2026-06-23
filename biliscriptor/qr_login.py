@@ -3,12 +3,11 @@
 Scan a Bilibili login QR code and save cookies locally.
 
 Usage:
-    python login_bilibili_qr.py
-    python login_bilibili_qr.py --cookie-file bilibili_cookies.txt
+    python -m biliscriptor login
+    python -m biliscriptor.qr_login --cookie-file bilibili_cookies.txt
 
 The script writes a Netscape-format cookie file that can be reused by
-fetch_bilibili_subtitles.py. It intentionally does not print sensitive
-cookie values.
+the parser. It intentionally does not print sensitive cookie values.
 """
 
 from __future__ import annotations

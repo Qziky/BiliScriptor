@@ -1,0 +1,38 @@
+<svg width="940" height="320" viewBox="0 0 940 320" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Star Curve</title>
+  <desc id="desc">A decorative GitHub star growth curve placeholder for BiliScriptor.</desc>
+  <defs>
+    <linearGradient id="line" x1="96" y1="230" x2="826" y2="64" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#19C7E8"/>
+      <stop offset="0.55" stop-color="#4F7CFF"/>
+      <stop offset="1" stop-color="#FF78AE"/>
+    </linearGradient>
+    <linearGradient id="fill" x1="460" y1="74" x2="460" y2="260" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#4F7CFF" stop-opacity="0.23"/>
+      <stop offset="1" stop-color="#4F7CFF" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="shadow" x="52" y="28" width="836" height="246" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#223170" flood-opacity="0.14"/>
+    </filter>
+  </defs>
+  <rect width="940" height="320" rx="18" fill="#F8FCFF"/>
+  <path d="M96 72H844M96 122H844M96 172H844M96 222H844" stroke="#DDEBFA" stroke-width="2"/>
+  <path d="M132 260V56M300 260V56M468 260V56M636 260V56M804 260V56" stroke="#EDF4FC" stroke-width="2"/>
+  <text x="52" y="77" fill="#8A98B7" font-family="Inter, Arial, sans-serif" font-size="16">80</text>
+  <text x="52" y="127" fill="#8A98B7" font-family="Inter, Arial, sans-serif" font-size="16">60</text>
+  <text x="52" y="177" fill="#8A98B7" font-family="Inter, Arial, sans-serif" font-size="16">40</text>
+  <text x="52" y="227" fill="#8A98B7" font-family="Inter, Arial, sans-serif" font-size="16">20</text>
+  <text x="114" y="290" fill="#8A98B7" font-family="Inter, Arial, sans-serif" font-size="16">Start</text>
+  <text x="438" y="290" fill="#8A98B7" font-family="Inter, Arial, sans-serif" font-size="16">Iterate</text>
+  <text x="766" y="290" fill="#8A98B7" font-family="Inter, Arial, sans-serif" font-size="16">Grow</text>
+  <g filter="url(#shadow)">
+    <path d="M112 231C174 226 202 216 260 202C323 187 348 169 406 160C468 151 501 177 558 142C620 104 657 96 714 92C763 88 792 69 830 58V260H112V231Z" fill="url(#fill)"/>
+    <path d="M112 231C174 226 202 216 260 202C323 187 348 169 406 160C468 151 501 177 558 142C620 104 657 96 714 92C763 88 792 69 830 58" stroke="url(#line)" stroke-width="8" stroke-linecap="round"/>
+    <circle cx="112" cy="231" r="8" fill="#19C7E8" stroke="white" stroke-width="5"/>
+    <circle cx="406" cy="160" r="8" fill="#4F7CFF" stroke="white" stroke-width="5"/>
+    <circle cx="558" cy="142" r="8" fill="#6E72FF" stroke="white" stroke-width="5"/>
+    <circle cx="830" cy="58" r="10" fill="#FF78AE" stroke="white" stroke-width="5"/>
+  </g>
+  <text x="112" y="38" fill="#24315E" font-family="Inter, Arial, sans-serif" font-size="24" font-weight="800">Star History</text>
+  <text x="270" y="38" fill="#6D7A9A" font-family="Inter, Arial, sans-serif" font-size="16">replace with live chart after publishing</text>
+</svg>

@@ -3,18 +3,17 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "bili-md"
+name = "biliscriptor"
 version = "0.1.0"
-description = "Local Bilibili video parser that exports traceable data packages."
+description = "BiliScriptor / 哔稿匠: export traceable Markdown-ready Bilibili data packages."
 requires-python = ">=3.10"
 dependencies = []
 
 [project.scripts]
-bili-md = "bili_md.cli:main"
+biliscriptor = "biliscriptor.cli:main"
 
 [tool.setuptools]
-packages = ["bili_md"]
-py-modules = ["login_bilibili_qr", "fetch_bilibili_subtitles"]
+packages = ["biliscriptor"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
